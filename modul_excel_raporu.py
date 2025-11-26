@@ -269,7 +269,13 @@ class MostExcelJobReport:
         sc = start_col
         ec = start_col + 8
         sr = start_row
+
         grey = PatternFill("solid", fgColor="D9D9D9")
+
+        # VA / NVAN / NVA için özel renkler
+        va_fill   = PatternFill("solid", fgColor="00B050")  # yeşil
+        nvan_fill = PatternFill("solid", fgColor="FFFF00")  # sarı
+        nva_fill  = PatternFill("solid", fgColor="FF0000")  # kırmızı
 
         # 1) Başlık
         ws.merge_cells(start_row=sr, start_column=sc, end_row=sr+2, end_column=ec)
@@ -291,8 +297,9 @@ class MostExcelJobReport:
 
         # 4) VAR satırı
         var = sr+6
-        ws.merge_cells(start_row=var, start_column=sc, end_row=var, end_column=sc+4)
+        ws.merge_cells(start_row=var, start_column=sc,   end_row=var, end_column=sc+4)
         ws.merge_cells(start_row=var, start_column=sc+5, end_row=var, end_column=sc+6)
+        self._draw_frame(ws, var, var, sc, ec)
 
         # 5) CT / TT satırı
         ct = sr+8
@@ -321,7 +328,6 @@ class MostExcelJobReport:
         self._draw_frame(ws, ct, ct, sc, ec)
 
         # 6) Operasyon başlıkları
-               # 6) Operasyon başlıkları
         h = sr + 11
         n = max(10, adim_sayisi)
 
@@ -337,7 +343,7 @@ class MostExcelJobReport:
         cell.alignment = self.center
         cell.fill = grey
 
-        # OPERASYON ADIMLARI  (C ve D sütunları birleşik!)
+        # OPERASYON ADIMLARI  (C ve D sütunları birleşik)
         ws.merge_cells(start_row=h, start_column=sc+2, end_row=h, end_column=sc+3)
         cell = ws.cell(row=h, column=sc+2, value="OPERASYON ADIMLARI")
         cell.font = self.header_font
@@ -350,42 +356,52 @@ class MostExcelJobReport:
         cell.alignment = self.center
         cell.fill = grey
 
-        # VA / NVAN / NVA
+        # VA / NVAN / NVA başlıkları (renkli)
         cell = ws.cell(row=h, column=sc+5, value="VA (sn)")
         cell.font = self.header_font
         cell.alignment = self.center
-        cell.fill = grey
+        cell.fill = va_fill
 
         cell = ws.cell(row=h, column=sc+6, value="NVAN (sn)")
         cell.font = self.header_font
         cell.alignment = self.center
-        cell.fill = grey
+        cell.fill = nvan_fill
 
         cell = ws.cell(row=h, column=sc+7, value="NVA (sn)")
         cell.font = self.header_font
         cell.alignment = self.center
-        cell.fill = grey
+        cell.fill = nva_fill
 
-        # kenarlıkları çek
+        # Başlık satırının çerçevesi
         self._draw_frame(ws, h, h, sc, ec)
 
-
-        # 7) Boş satırlar
+        # 7) Operasyon satırları (C ve D her satırda birleşik)
+               # 7) Boş satırlar
         for r in range(h + 1, h + 1 + n):
+            # OPERASYON ADIMLARI sütunlarını (C ve D) her satırda birleştir
+            ws.merge_cells(start_row=r, start_column=sc+2, end_row=r, end_column=sc+3)
             self._draw_frame(ws, r, r, sc, ec)
 
-
-                # 8) TOPLAM / SWIP / GÜVENLİK / DOKÜMAN satır indexlerini,
+        # 8) TOPLAM / SWIP / GÜVENLİK / DOKÜMAN satır indexlerini,
         #   çizilen operasyon satırı sayısına göre ayarla
         t = h + 1 + n           # TOPLAM SÜRE satırı
         s = t + 2               # SWIP bloğu başı
         g = s + 4               # GÜVENLİK bloğu başı
         d = g + 3               # DOKÜMAN satırı
 
-        # 8) TOPLAM SÜRE
-        ws.merge_cells(start_row=t, start_column=sc, end_row=t, end_column=sc+3)
-        cell = ws.cell(row=t, column=sc, value="TOPLAM SÜRE")
+        # 8) TOPLAM SÜRE – tek satır, senin ekran görüntündeki gibi
+        # Solda: No + ID + OPERASYON ADIMLARI + ÖNCÜL (sc..sc+4) birleşik hücre
+        ws.merge_cells(start_row=t, start_column=sc,
+                       end_row=t, end_column=sc + 4)
+        cell = ws.cell(row=t, column=sc, value="toplam süre")
         cell.alignment = self.center
+
+        # Sağda: VA / NVAN / NVA sütunlarında AYRI AYRI toplam hücreleri
+        for col_offset in (5, 6, 7):  # VA, NVAN, NVA sütunları
+            total_cell = ws.cell(row=t, column=sc + col_offset)
+            total_cell.alignment = self.center  # buraya toplam değer/ formül gelecek
+
+        # Bu satırın çerçevesi
         self._draw_frame(ws, t, t, sc, ec)
 
         # 9) SWIP BLOĞU
@@ -404,6 +420,26 @@ class MostExcelJobReport:
         )
         cell.alignment = self.left
         self._draw_frame(ws, s, s+3, sc+3, ec)
+
+        # 10) GÜVENLİK BLOĞU
+        ws.merge_cells(start_row=g, start_column=sc, end_row=g+2, end_column=ec)
+        cell = ws.cell(row=g, column=sc, value="GÜVENLİK")
+        cell.font = self.header_font
+        cell.alignment = self.center
+        self._draw_frame(ws, g, g+2, sc, ec)
+
+        # 11) DOKÜMAN SATIRI
+        ws.merge_cells(start_row=d, start_column=sc, end_row=d, end_column=ec)
+        cell = ws.cell(
+            row=d,
+            column=sc,
+            value="DOKÜMAN NO: SOP.İŞ  |  REV NO: 0  |  REV TARİHİ: --.--.----  |  İLK YAYIN TARİHİ: --.--.----"
+        )
+        cell.alignment = self.center
+        self._draw_frame(ws, d, d, sc, ec)
+
+        return d
+
 
         # 10) GÜVENLİK BLOĞU
         ws.merge_cells(start_row=g, start_column=sc, end_row=g+2, end_column=ec)
@@ -458,13 +494,26 @@ class MostExcelJobReport:
             "Analiz Zamanı",
         ]
 
-        # Başlık satırı
+                # Başlık satırı
+        from openpyxl.styles import PatternFill  # dosyanın başında zaten import varsa tekrar gerek yok
+
         for col, h in enumerate(headers, start=1):
             c = ws.cell(row=1, column=col, value=h)
             c.font = self.header_font
-            c.fill = self.header_fill
+
+            # VA / NVAN / NVA için özel renkler
+            if h == "VA (sn)":
+                c.fill = PatternFill("solid", fgColor="00B050")  # yeşil
+            elif h == "NVAN (sn)":
+                c.fill = PatternFill("solid", fgColor="FFFF00")  # sarı
+            elif h == "NVA (sn)":
+                c.fill = PatternFill("solid", fgColor="FF0000")  # kırmızı
+            else:
+                c.fill = self.header_fill
+
             c.alignment = self.center
             c.border = self.thin_border
+
 
         # Zaman etüdü: JobID–AdımID bazında ortalama süre
         step_avg = pd.DataFrame(columns=["JobID", "AdımID", "Sure"])
@@ -953,17 +1002,9 @@ class MostExcelJobReport:
             c.alignment = self.center
             c.border = self.thin_border
 
-
-        critical_fill = PatternFill("solid", fgColor="FFC7CE") # Açık kırmızı
-        critical_font = Font(color="9C0006") # Koyu kırmızı yazı
-
         data_start = header_row + 1
         for idx, row in enumerate(cpm_rows):
             rr = data_start + idx
-            
-            # Bolluk (Slack) neredeyse 0 ise bu adım Kritiktir
-            is_critical = abs(row["Bolluk"]) < 0.0001
-
             vals = [
                 row["AdımID"], row["Adım Adı"], row["Öncül"], row["Süre"],
                 row["ES"], row["EF"], row["LS"], row["LF"], row["Bolluk"]
@@ -971,12 +1012,6 @@ class MostExcelJobReport:
             for off, v in enumerate(vals):
                 cc = ws.cell(row=rr, column=col_start + off, value=v)
                 cc.border = self.thin_border
-                
-                # Kritik yol ise boya
-                if is_critical:
-                    cc.fill = critical_fill
-                    cc.font = critical_font
-
                 if off in (0, 3, 4, 5, 6, 7, 8):
                     cc.alignment = self.center
                 else:
