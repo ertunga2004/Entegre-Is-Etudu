@@ -953,9 +953,17 @@ class MostExcelJobReport:
             c.alignment = self.center
             c.border = self.thin_border
 
+
+        critical_fill = PatternFill("solid", fgColor="FFC7CE") # Açık kırmızı
+        critical_font = Font(color="9C0006") # Koyu kırmızı yazı
+
         data_start = header_row + 1
         for idx, row in enumerate(cpm_rows):
             rr = data_start + idx
+            
+            # Bolluk (Slack) neredeyse 0 ise bu adım Kritiktir
+            is_critical = abs(row["Bolluk"]) < 0.0001
+
             vals = [
                 row["AdımID"], row["Adım Adı"], row["Öncül"], row["Süre"],
                 row["ES"], row["EF"], row["LS"], row["LF"], row["Bolluk"]
@@ -963,6 +971,12 @@ class MostExcelJobReport:
             for off, v in enumerate(vals):
                 cc = ws.cell(row=rr, column=col_start + off, value=v)
                 cc.border = self.thin_border
+                
+                # Kritik yol ise boya
+                if is_critical:
+                    cc.fill = critical_fill
+                    cc.font = critical_font
+
                 if off in (0, 3, 4, 5, 6, 7, 8):
                     cc.alignment = self.center
                 else:
