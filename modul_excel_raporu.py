@@ -951,6 +951,7 @@ class MostExcelJobReport:
         for _, row in steps.sort_values("AdımID").iterrows():
             aid = int(row["AdımID"])
             name = row.get("Adım Adı", "") or ""
+            deger_turu = row.get("DegerTuru", "") or ""  # <--- BURASI EKLENDİ
             pred_list = preds.get(aid, [])
             pred_str = ",".join(str(p) for p in pred_list)
 
@@ -970,6 +971,7 @@ class MostExcelJobReport:
                 "LS": ls,
                 "LF": lf,
                 "Bolluk": slack,
+                "DegerTuru": deger_turu  # <--- BURASI EKLENDİ
             })
 
         return rows
@@ -977,9 +979,13 @@ class MostExcelJobReport:
     def _write_cpm_and_gantt_block(self, ws, start_row: int, col_start: int,
                                    title: str, cpm_rows: List[Dict]) -> int:
         """
-        Tek blok: Üstte CPM tablosu, altında Gantt veri tablosu + stacked bar chart.
-        Geri dönüş: kullanılan son satır numarası.
+        Tek blok: Üstte CPM tablosu (Kritik yol boyalı), 
+        altında Gantt veri tablosu + özelleştirilmiş stacked bar chart.
         """
+        from openpyxl.chart import BarChart, Reference, Series
+        from openpyxl.chart.label import DataLabelList
+        from openpyxl.styles import PatternFill, Font
+
         if not cpm_rows:
             return start_row
 
@@ -1002,9 +1008,17 @@ class MostExcelJobReport:
             c.alignment = self.center
             c.border = self.thin_border
 
+        # -- KRİTİK YOL BOYAMA STİLLERİ --
+        critical_fill = PatternFill("solid", fgColor="FFC7CE") # Açık kırmızı
+        critical_font = Font(color="9C0006") # Koyu kırmızı yazı
+
         data_start = header_row + 1
         for idx, row in enumerate(cpm_rows):
             rr = data_start + idx
+            
+            # Bolluk (Slack) neredeyse 0 ise bu adım Kritiktir
+            is_critical = abs(row["Bolluk"]) < 0.0001
+
             vals = [
                 row["AdımID"], row["Adım Adı"], row["Öncül"], row["Süre"],
                 row["ES"], row["EF"], row["LS"], row["LF"], row["Bolluk"]
@@ -1012,6 +1026,12 @@ class MostExcelJobReport:
             for off, v in enumerate(vals):
                 cc = ws.cell(row=rr, column=col_start + off, value=v)
                 cc.border = self.thin_border
+                
+                # Kritik yol ise boya
+                if is_critical:
+                    cc.fill = critical_fill
+                    cc.font = critical_font
+
                 if off in (0, 3, 4, 5, 6, 7, 8):
                     cc.alignment = self.center
                 else:
@@ -1019,77 +1039,127 @@ class MostExcelJobReport:
 
         last_cpm_row = data_start + len(cpm_rows) - 1
 
-        # ---------- GANTT TABLOSU ----------
+        # ---------- GANTT TABLOSU (Veri Hazırlığı) ----------
         gantt_title_row = last_cpm_row + 2
         gt_cell = ws.cell(row=gantt_title_row, column=col_start,
                           value=title.replace("CPM", "Gantt").strip())
+        
+        # Başlık genişliği (5 sütun: Adı, ES, VA, NVAN, NVA)
         ws.merge_cells(start_row=gantt_title_row, start_column=col_start,
-                       end_row=gantt_title_row, end_column=col_start + 4)
+                       end_row=gantt_title_row, end_column=col_start + 4) 
         gt_cell.font = self.header_font
         gt_cell.alignment = self.center
 
         table_header_row = gantt_title_row + 1
 
-        # Adım Adı | Başlangıç (ES) | Süre (sn)
-        ws.cell(row=table_header_row, column=col_start,     value="Adım Adı").font = self.header_font
-        ws.cell(row=table_header_row, column=col_start + 1, value="Başlangıç (ES)").font = self.header_font
-        ws.cell(row=table_header_row, column=col_start + 2, value="Süre (sn)").font = self.header_font
+        # Gantt veri başlıkları
+        g_headers = ["Adım Adı", "Başlangıç (ES)", "VA", "NVAN", "NVA"]
+        for i, h in enumerate(g_headers):
+            c = ws.cell(row=table_header_row, column=col_start + i, value=h)
+            c.font = self.header_font
+            c.alignment = self.center
+            c.border = self.thin_border
 
+        # Verileri ayırarak yaz (VA/NVAN/NVA sütunlarına dağıt)
         for idx, row in enumerate(cpm_rows):
             rr = table_header_row + 1 + idx
-            ws.cell(row=rr, column=col_start,     value=row["Adım Adı"])
-            ws.cell(row=rr, column=col_start + 1, value=row["ES"])
-            ws.cell(row=rr, column=col_start + 2, value=row["Süre"])
+            step_name = row["Adım Adı"]
+            es_val = row["ES"]
+            duration = row["Süre"]
+            d_type = str(row.get("DegerTuru", "")).strip().upper()
 
-        # ---------- STACKED BAR (MOST ekranındaki stil) ----------
+            # Süreyi ilgili türe ata, diğerlerini 0 yap
+            va_val = duration if d_type in ["VA", "KD"] else 0
+            nvan_val = duration if d_type in ["NVAN", "ZGK", "KDG"] else 0
+            nva_val = duration if d_type in ["NVA", "KDZ", "KDS"] else 0
+            
+            # Türü belirsiz ama süresi varsa varsayılan olarak NVAN (sarı) yap
+            if duration > 0 and va_val == 0 and nvan_val == 0 and nva_val == 0:
+                nvan_val = duration
+
+            vals = [step_name, es_val, va_val, nvan_val, nva_val]
+            
+            for i, v in enumerate(vals):
+                c = ws.cell(row=rr, column=col_start + i, value=v)
+                c.border = self.thin_border
+                if i == 0: c.alignment = self.left
+                else: c.alignment = self.center
+
+        # ---------- STACKED BAR CHART (Düzeltilmiş) ----------
         chart = BarChart()
         chart.type = "bar"
         chart.grouping = "stacked"
         chart.overlap = 100
-        chart.title = title
+        chart.title = title.replace("CPM", "Gantt")
+        chart.legend = None # Efsaneyi (Legend) gizle
 
-        # Veri: ES + Süre
-        data_ref = Reference(
-            ws,
-            min_col=col_start + 1,          # ES
-            max_col=col_start + 2,          # Süre
-            min_row=table_header_row,       # başlık satırı dahil
-            max_row=table_header_row + len(cpm_rows)
-        )
-
-        # Kategoriler: Adım adları (sol eksen)
-        cats_ref = Reference(
-            ws,
-            min_col=col_start,
-            max_col=col_start,
-            min_row=table_header_row + 1,
-            max_row=table_header_row + len(cpm_rows)
-        )
-
-        chart.add_data(data_ref, titles_from_data=True)
+        data_count = len(cpm_rows)
+        
+        # 1. KATEGORİLER (Y Ekseni - Adım Adları)
+        # col_start sütunu "Adım Adı"dır.
+        cats_ref = Reference(ws, min_col=col_start, min_row=table_header_row + 1, max_row=table_header_row + data_count)
         chart.set_categories(cats_ref)
 
-        # Ekseni sade bırak (Excel varsayılan ayarları adım adlarını gösterir)
-        chart.y_axis.title = None
-        chart.x_axis.title = None
+        # 2. SERİLER
+        
+        # Seri 1: ES (Görünmez/Boşluk) - Çubuğu ötelemek için
+        es_ref = Reference(ws, min_col=col_start + 1, min_row=table_header_row, max_row=table_header_row + data_count)
+        s1 = Series(es_ref, title_from_data=True)
+        s1.graphicalProperties.noFill = True 
+        s1.graphicalProperties.line.noFill = True
+        chart.series.append(s1)
 
+        # Seri 2: VA (Yeşil)
+        va_ref = Reference(ws, min_col=col_start + 2, min_row=table_header_row, max_row=table_header_row + data_count)
+        s2 = Series(va_ref, title_from_data=True)
+        s2.graphicalProperties.solidFill = "00B050" # Yeşil
+        s2.graphicalProperties.line.noFill = True
+        # Değerleri göster (Sadece sayı)
+        s2.dLbls = DataLabelList()
+        s2.dLbls.showVal = True      # Değeri göster (örn: 10)
+        s2.dLbls.showCatName = False # Kategori adını GİZLE (Karışıklığı önler)
+        s2.dLbls.showSerName = False # Seri adını GİZLE
+        chart.series.append(s2)
 
+        # Seri 3: NVAN (Sarı)
+        nvan_ref = Reference(ws, min_col=col_start + 3, min_row=table_header_row, max_row=table_header_row + data_count)
+        s3 = Series(nvan_ref, title_from_data=True)
+        s3.graphicalProperties.solidFill = "FFFF00" # Sarı
+        s3.graphicalProperties.line.noFill = True
+        s3.dLbls = DataLabelList()
+        s3.dLbls.showVal = True
+        s3.dLbls.showCatName = False
+        chart.series.append(s3)
 
-        chart.height = 7
-        chart.width = 12
+        # Seri 4: NVA (Kırmızı)
+        nva_ref = Reference(ws, min_col=col_start + 4, min_row=table_header_row, max_row=table_header_row + data_count)
+        s4 = Series(nva_ref, title_from_data=True)
+        s4.graphicalProperties.solidFill = "FF0000" # Kırmızı
+        s4.graphicalProperties.line.noFill = True
+        s4.dLbls = DataLabelList()
+        s4.dLbls.showVal = True
+        s4.dLbls.showCatName = False
+        chart.series.append(s4)
 
-        anchor_col_letter = get_column_letter(col_start + 4)
-        anchor_row = table_header_row + 1
+        # 3. EKSEN AYARLARI
+        chart.height = 12 # Yükseklik
+        chart.width = 20  # Genişlik
+        
+        # Y Ekseni (Adımlar): Ters sıralama (Yukarıdan aşağı)
+        chart.y_axis.scaling.orientation = "maxMin" 
+        chart.y_axis.tickLblPos = "low" # Etiketleri solda tut
+        
+        # X Ekseni (Zaman): Ölçeklerin görünmesi için
+        # Izgara çizgilerini (Gridlines) hafif gösterelim ki süre anlaşılsın
+        chart.x_axis.majorGridlines = None # Excel varsayılanına bırak (genelde açık olur)
+        chart.x_axis.tickLblPos = "nextTo" # Sayıları eksenin yanında göster (Gizleme)
+
+        # 4. GRAFİK KONUMU (Bir sütun sola kaydırdık: +5)
+        anchor_col_letter = get_column_letter(col_start + 5)
+        anchor_row = table_header_row
         ws.add_chart(chart, f"{anchor_col_letter}{anchor_row}")
 
-        return table_header_row + 1 + len(cpm_rows)
-
-
-
-
-    # ------------ Tek Sayfa Yazımı (bir İş Adı) ------------
-
-        # ------------ Tek Sayfa Yazımı (bir İş Adı) ------------
+        return table_header_row + 1 + data_count
 
     def _write_sheet_for_job(self, wb: Workbook, job_name: str, job_df: pd.DataFrame):
         ws = wb.create_sheet(self._safe_sheet_name(job_name))
@@ -1102,7 +1172,7 @@ class MostExcelJobReport:
         # Adım listesi (CPM için)
         # Adım listesi (CPM için) – Öncül Adım kolonunu da al
         steps_df = (
-            job_df[["AdımID", "Adım Adı", "Öncül Adım"]]
+            job_df[["AdımID", "Adım Adı", "Öncül Adım", "DegerTuru"]]
             .dropna(subset=["AdımID"])
             .drop_duplicates()
         )
