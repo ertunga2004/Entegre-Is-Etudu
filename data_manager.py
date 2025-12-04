@@ -44,6 +44,8 @@ class DataManager:
         self.IS_ADIMLARI_DTYPES = {'JobID': 'Int64', 'AdımID': 'Int64', 'Öncül Adım': str}
 
         self.init_files()
+        self._fix_westinghouse_csv_columns()
+
 
     
     def _append_row_to_df(self, df, row_dict):
@@ -52,17 +54,29 @@ class DataManager:
             return pd.concat([df, new_row_df], ignore_index=True)
 
     def get_westinghouse_columns(self):
-        return ['AnalizID', 'JobID', 'AdımID', 'Yetenek', 'Çaba', 'Çalışma Koşulları', 'Tutarlılık', 
-                'Kisisel_Gereksinimler', 'Fiziksel_Caba_Cok_Hafif', 'Fiziksel_Caba_Hafif',
-                'Fiziksel_Caba_Orta', 'Fiziksel_Caba_Agir', 'Fiziksel_Caba_Cok_Agir',
-                'Dusunsel_Caba_Plan_Normal', 'Dusunsel_Caba_Karisik_Normal', 'Dusunsel_Caba_Plan_Yogun',
-                'Dusunsel_Caba_Karisik_Yogun', 'Poz_Serbest', 'Poz_Sabit_Durus', 'Poz_Sabit_Ayakta',
-                'Poz_Cokme_Egilme', 'Poz_Uzanma_ve_Omuz', 'Atmosfer_Temiz', 'Atmosfer_Kotu_Koku',
-                'Atmosfer_Zararlı_Toz_Gaz', 'Isı_Soguk', 'Isı_Normal', 'Isı_Sicak',
-                'Gurultu_Normal_Is', 'Gurultu_Normal_Makine', 'Gurultu_Yuksek_Sabit',
-                'Gurultu_Yuksek_Frekans', 'Genel_Kirli', 'Genel_Islak_Doseme', 'Genel_Titresim',
-                'Genel_Monotonluk', 'Genel_Dusunsel_Yorgunluk', 'Koruyucu_Elbise_Takım',
-                'Koruyucu_Elbise_Eldiven', 'Koruyucu_Elbise_Agır_ve_Ozel_Yelek', 'Koruyucu_Elbise_Maske','Timestamp']
+        return [
+            'AnalizID', 'JobID', 'AdımID',
+            'Yetenek', 'Çaba', 'Çalışma Koşulları', 'Tutarlılık',
+            # Zamanla ilgili yeni kolonlar:
+            'NormalZaman', 'StandartZaman',
+            # Tolerans + ortam kolonların aynen kalsın:
+            'Kisisel_Gereksinimler',
+            'Fiziksel_Caba_Cok_Hafif', 'Fiziksel_Caba_Hafif',
+            'Fiziksel_Caba_Orta', 'Fiziksel_Caba_Agir', 'Fiziksel_Caba_Cok_Agir',
+            'Dusunsel_Caba_Plan_Normal', 'Dusunsel_Caba_Karisik_Normal',
+            'Dusunsel_Caba_Plan_Yogun', 'Dusunsel_Caba_Karisik_Yogun',
+            'Poz_Serbest', 'Poz_Sabit_Durus', 'Poz_Sabit_Ayakta',
+            'Poz_Cokme_Egilme', 'Poz_Uzanma_ve_Omuz',
+            'Atmosfer_Temiz', 'Atmosfer_Kotu_Koku', 'Atmosfer_Zararlı_Toz_Gaz',
+            'Isı_Soguk', 'Isı_Normal', 'Isı_Sicak',
+            'Gurultu_Normal_Is', 'Gurultu_Normal_Makine',
+            'Gurultu_Yuksek_Sabit', 'Gurultu_Yuksek_Frekans',
+            'Genel_Kirli', 'Genel_Islak_Doseme', 'Genel_Titresim',
+            'Genel_Monotonluk', 'Genel_Dusunsel_Yorgunluk',
+            'Koruyucu_Elbise_Takım', 'Koruyucu_Elbise_Eldiven',
+            'Koruyucu_Elbise_Agır_ve_Ozel_Yelek', 'Koruyucu_Elbise_Maske',
+            'Timestamp'
+    ]
 
     def init_files(self):
         files_to_check = {
@@ -80,6 +94,42 @@ class DataManager:
             if not os.path.exists(path) or os.path.getsize(path) == 0:
                 pd.DataFrame(columns=columns).to_csv(path, index=False)
     
+
+    def _fix_westinghouse_csv_columns(self):
+        import pandas as pd
+
+        if not os.path.exists(self.westinghouse_path):
+            return
+
+        df = pd.read_csv(self.westinghouse_path)
+
+        changed = False
+        if "Tutarlılık" in df.columns:
+            base_index = df.columns.get_loc("Tutarlılık") + 1
+        else:
+            base_index = min(3, len(df.columns))
+
+        if "NormalZaman" not in df.columns:
+            df.insert(base_index, "NormalZaman", pd.NA)
+            base_index += 1
+            changed = True
+
+        if "StandartZaman" not in df.columns:
+            df.insert(base_index, "StandartZaman", pd.NA)
+            changed = True
+
+        if changed:
+            df.to_csv(self.westinghouse_path, index=False)
+
+
+
+
+
+
+
+
+
+
     def _get_next_global_analiz_id(self):
         """Tüm analiz dosyalarını tarayarak bir sonraki benzersiz AnalizID'yi döndürür."""
         all_ids = [0] 

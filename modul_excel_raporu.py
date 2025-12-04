@@ -176,14 +176,27 @@ class MostExcelJobReport:
 
     # ------------ Yardımcı: WH kolonlarını normalize et ------------
     def _normalize_west_columns(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Şimdilik basit sürüm: Westinghouse CSV kolonlarına dokunmadan
-        dataframe'i olduğu gibi geri döndürüyor.
-        İstersen sonra burada rename_map ile kolon isimlerini düzeltebiliriz.
-        """
         if df is None or df.empty:
-             return df
+            return df
+
+        # Beklediğimiz ana kolonlar
+        required = ["AnalizID", "JobID", "AdımID", "NormalZaman", "StandartZaman"]
+        for col in required:
+            if col not in df.columns:
+                df[col] = pd.NA
+
+        # AnalizID / AdımID sayısal olsun
+        for col in ["AnalizID", "AdımID"]:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors="coerce")
+
+        # Zaman kolonlarını float'a çevir
+        for col in ["NormalZaman", "StandartZaman"]:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors="coerce")
+
         return df
+
         # ------------ Veri Yükleme ------------
 
     def _load(self):
@@ -385,6 +398,19 @@ class MostExcelJobReport:
         # 8) TOPLAM / SWIP / GÜVENLİK / DOKÜMAN satır indexlerini,
         #   çizilen operasyon satırı sayısına göre ayarla
         t = h + 1 + n           # TOPLAM SÜRE satırı
+
+                # 8a) CT hücresine formül: TOPLAM VA + TOPLAM NVAN + TOPLAM NVA
+        ct_row = ct
+        toplam_row = t  # "toplam süre" satırı
+
+        va_top   = ws.cell(row=toplam_row, column=sc + 5).coordinate
+        nvan_top = ws.cell(row=toplam_row, column=sc + 6).coordinate
+        nva_top  = ws.cell(row=toplam_row, column=sc + 7).coordinate
+
+        ct_cell = ws.cell(row=ct_row, column=sc + 3)
+        ct_cell.value = f"={va_top}+{nvan_top}+{nva_top}"
+        ct_cell.alignment = self.center
+
         s = t + 2               # SWIP bloğu başı
         g = s + 4               # GÜVENLİK bloğu başı
         d = g + 3               # DOKÜMAN satırı
@@ -459,6 +485,406 @@ class MostExcelJobReport:
         self._draw_frame(ws, d, d, sc, ec)
 
         return d
+    
+
+    def _fill_zaman_sop_from_time_study(
+        self,
+        ws,
+        start_row: int,
+        adim_sayisi: int,
+        job_df: pd.DataFrame,
+        zaman_map: Dict
+    ) -> None:
+        """
+        Sadece SOL taraftaki (Zaman Etüdü) SOP tablosunu doldurur.
+        Kaynaklar:
+          - Is_Adimlari.csv  -> AdımID, Adım Adı, Öncül Adım, DegerTuru
+          - Zaman_Etudu.csv  -> AdımID bazında Sure (ortalama süre)
+        """
+
+        # SOP bandının konumu (sol blok)
+        sc = 1                    # başlangıç sütunu
+        sr = start_row            # SOP'un başladığı satır (bizde 2)
+        ec = sc + 8
+
+        # _write_sop_band içindeki aynı hesaplar:
+        h = sr + 11               # tablo başlık satırı (No, ID, ...)
+        n = max(10, adim_sayisi)  # en az 10 satır
+        data_start = h + 1        # ilk operasyon satırı
+        data_end = h + n          # son operasyon satırı
+        toplam_row = h + 1 + n    # "TOPLAM SÜRE" satırı
+
+        # İş adımlarını hazırlayalım
+        steps = job_df.dropna(subset=["AdımID"]).copy()
+        if steps.empty:
+            return
+
+        # AdımID int olsun ve sıralı gidelim
+        steps["AdımID"] = steps["AdımID"].astype(int)
+        steps = steps.sort_values("AdımID")
+
+        # DegerTuru -> VA / NVAN / NVA sınıflaması
+        def _classify(deger):
+            if not isinstance(deger, str):
+                return ""
+            d = deger.strip().upper()
+            if d in ("KD", "VA"):
+                return "VA"
+            if d in ("ZGK", "NVAN", "NVAA", "NV-AN"):
+                return "NVAN"
+            if d in ("KDZ", "NVA"):
+                return "NVA"
+            return ""
+
+        current_row = data_start
+        no = 1
+
+        for _, r in steps.iterrows():
+            if current_row > data_end:
+                break  # güvenlik
+
+            adim_id = r.get("AdımID")
+            op_name = r.get("Adım Adı")
+            oncul = r.get("Öncül Adım")
+            cat = _classify(r.get("DegerTuru"))
+
+            # Zaman Etüdü'nden süre (yoksa 0)
+            sure = float(zaman_map.get(adim_id, 0.0) or 0.0)
+
+            va = nv_an = nva = 0.0
+            if cat == "VA":
+                va = sure
+            elif cat == "NVAN":
+                nv_an = sure
+            elif cat == "NVA":
+                nva = sure
+
+            # Hücrelere yaz
+            ws.cell(row=current_row, column=sc,     value=no).alignment = self.center    # No
+            ws.cell(row=current_row, column=sc + 1, value=adim_id).alignment = self.center
+            ws.cell(row=current_row, column=sc + 2, value=op_name).alignment = self.left
+            ws.cell(row=current_row, column=sc + 4, value=oncul).alignment = self.center
+            ws.cell(row=current_row, column=sc + 5, value=round(va, 4)).alignment = self.center
+            ws.cell(row=current_row, column=sc + 6, value=round(nv_an, 4)).alignment = self.center
+            ws.cell(row=current_row, column=sc + 7, value=round(nva, 4)).alignment = self.center
+
+            # Kenarlık
+            for col in range(sc, sc + 8):
+                ws.cell(row=current_row, column=col).border = self.thin_border
+
+            no += 1
+            current_row += 1
+
+        # --- TOPLAM SÜRE satırı için formüller ---
+        # (VA, NVAN, NVA sütunlarının toplamı)
+        if data_start <= data_end:
+            # VA toplamı
+           # VA toplamı
+            first_va = ws.cell(row=data_start, column=sc + 5).coordinate
+            last_va  = ws.cell(row=data_end,   column=sc + 5).coordinate
+            ws.cell(
+                row=toplam_row,
+                column=sc + 5,
+                value=f"=SUM({first_va}:{last_va})"
+            ).alignment = self.center
+
+            # NVAN toplamı
+            first_nv = ws.cell(row=data_start, column=sc + 6).coordinate
+            last_nv  = ws.cell(row=data_end,   column=sc + 6).coordinate
+            ws.cell(
+                row=toplam_row,
+                column=sc + 6,
+                value=f"=SUM({first_nv}:{last_nv})"
+            ).alignment = self.center
+
+            # NVA toplamı
+            first_nva = ws.cell(row=data_start, column=sc + 7).coordinate
+            last_nva  = ws.cell(row=data_end,   column=sc + 7).coordinate
+            ws.cell(
+                row=toplam_row,
+                column=sc + 7,
+                value=f"=SUM({first_nva}:{last_nva})"
+            ).alignment = self.center
+            # --- ÇEVRİM SÜRESİ (CT) hücresini doldur ---
+            ct_row = sr + 8          # CT satırı
+            ct_col = sc + 3          # CT değer hücresi (sn yazan hücrenin solu)
+
+            va_total_addr   = ws.cell(row=toplam_row, column=sc + 5).coordinate
+            nvan_total_addr = ws.cell(row=toplam_row, column=sc + 6).coordinate
+            nva_total_addr  = ws.cell(row=toplam_row, column=sc + 7).coordinate
+
+            ct_cell = ws.cell(
+                row=ct_row,
+                column=ct_col,
+                value=f"=SUM({va_total_addr},{nvan_total_addr},{nva_total_addr})"
+            )
+            ct_cell.alignment = self.center
+
+            # --- TAKT ZAMANI (TT) hücresini hazırla ---
+            tt_row = ct_row
+            tt_col = sc + 7          # TT değer hücresi (sn yazan hücrenin solu)
+
+            tt_cell = ws.cell(row=tt_row, column=tt_col)
+            # Burayı istersen sabit yapabilirsin, örn:
+            # tt_cell.value = 60    # 60 sn gibi
+            # Şimdilik boş bırakıyorum, kullanıcı Excel'den girsin:
+            tt_cell.value = None
+            tt_cell.alignment = self.center
+
+    def _fill_west_sop_from_westhouse(
+        self,
+        ws,
+        start_row: int,
+        adim_sayisi: int,
+        job_df: pd.DataFrame,
+        west_map: Dict
+    ) -> None:
+        """
+        Ortadaki (Westinghouse) SOP tablosunu doldurur.
+        Kaynaklar:
+          - Is_Adimlari.csv  -> AdımID, Adım Adı, Öncül Adım, DegerTuru
+          - Westinghouse_Analizleri.csv -> AdımID bazında Standart Süre (west_map)
+        """
+
+        # Westinghouse SOP bandı orta blok: start_col = 11
+        sc = 11                   # başlangıç sütunu (Westinghouse SOP)
+        sr = start_row            # SOP'un başladığı satır (bizde 2)
+        ec = sc + 8
+
+        # _write_sop_band içindeki aynı hesaplar:
+        h = sr + 11               # tablo başlık satırı (No, ID, ...)
+        n = max(10, adim_sayisi)  # en az 10 satır
+        data_start = h + 1        # ilk operasyon satırı
+        data_end = h + n          # son operasyon satırı
+        toplam_row = h + 1 + n    # "TOPLAM SÜRE" satırı
+
+        # İş adımlarını hazırlayalım
+        steps = job_df.dropna(subset=["AdımID"]).copy()
+        if steps.empty:
+            return
+
+        # AdımID int olsun ve sıralı gidelim
+        steps["AdımID"] = steps["AdımID"].astype(int)
+        steps = steps.sort_values("AdımID")
+
+        # DegerTuru -> VA / NVAN / NVA sınıflaması (Zaman Etüdü ile bire bir aynı)
+        def _classify(deger):
+            if not isinstance(deger, str):
+                return ""
+            d = deger.strip().upper()
+            if d in ("KD", "VA"):
+                return "VA"
+            if d in ("ZGK", "NVAN", "NVAA", "NV-AN"):
+                return "NVAN"
+            if d in ("KDZ", "NVA"):
+                return "NVA"
+            return ""
+
+        current_row = data_start
+        no = 1
+
+        for _, r in steps.iterrows():
+            if current_row > data_end:
+                break  # güvenlik
+
+            adim_id = r.get("AdımID")
+            op_name = r.get("Adım Adı")
+            oncul = r.get("Öncül Adım")
+            cat = _classify(r.get("DegerTuru"))
+
+            # Westinghouse analizinden standart süre (yoksa 0)
+            sure = float(west_map.get(adim_id, 0.0) or 0.0)
+
+            va = nv_an = nva = 0.0
+            if cat == "VA":
+                va = sure
+            elif cat == "NVAN":
+                nv_an = sure
+            elif cat == "NVA":
+                nva = sure
+
+            # Hücrelere yaz (ortadaki SOP bandı)
+            ws.cell(row=current_row, column=sc,     value=no).alignment = self.center    # No
+            ws.cell(row=current_row, column=sc + 1, value=adim_id).alignment = self.center
+            ws.cell(row=current_row, column=sc + 2, value=op_name).alignment = self.left
+            ws.cell(row=current_row, column=sc + 4, value=oncul).alignment = self.center
+            ws.cell(row=current_row, column=sc + 5, value=round(va, 4)).alignment = self.center
+            ws.cell(row=current_row, column=sc + 6, value=round(nv_an, 4)).alignment = self.center
+            ws.cell(row=current_row, column=sc + 7, value=round(nva, 4)).alignment = self.center
+
+            # Kenarlık
+            for col in range(sc, sc + 8):
+                ws.cell(row=current_row, column=col).border = self.thin_border
+
+            no += 1
+            current_row += 1
+
+        # --- TOPLAM SÜRE satırı için formüller (VA / NVAN / NVA) ---
+        if data_start <= data_end:
+            # VA toplamı
+            first_va = ws.cell(row=data_start, column=sc + 5).coordinate
+            last_va  = ws.cell(row=data_end,   column=sc + 5).coordinate
+            ws.cell(
+                row=toplam_row,
+                column=sc + 5,
+                value=f"=SUM({first_va}:{last_va})"
+            ).alignment = self.center
+
+            # NVAN toplamı
+            first_nv = ws.cell(row=data_start, column=sc + 6).coordinate
+            last_nv  = ws.cell(row=data_end,   column=sc + 6).coordinate
+            ws.cell(
+                row=toplam_row,
+                column=sc + 6,
+                value=f"=SUM({first_nv}:{last_nv})"
+            ).alignment = self.center
+
+            # NVA toplamı
+            first_nva = ws.cell(row=data_start, column=sc + 7).coordinate
+            last_nva  = ws.cell(row=data_end,   column=sc + 7).coordinate
+            ws.cell(
+                row=toplam_row,
+                column=sc + 7,
+                value=f"=SUM({first_nva}:{last_nva})"
+            ).alignment = self.center
+            # --- ÇEVRİM SÜRESİ (CT) hücresini doldur ---
+            ct_row = sr + 8
+            ct_col = sc + 3
+
+            va_total_addr   = ws.cell(row=toplam_row, column=sc + 5).coordinate
+            nvan_total_addr = ws.cell(row=toplam_row, column=sc + 6).coordinate
+            nva_total_addr  = ws.cell(row=toplam_row, column=sc + 7).coordinate
+
+            ct_cell = ws.cell(
+                row=ct_row,
+                column=ct_col,
+                value=f"=SUM({va_total_addr},{nvan_total_addr},{nva_total_addr})"
+            )
+            ct_cell.alignment = self.center
+
+            # --- TAKT ZAMANI (TT) hücresini hazırla ---
+            tt_row = ct_row
+            tt_col = sc + 7
+
+            tt_cell = ws.cell(row=tt_row, column=tt_col)
+            # İstersen sabit yaz:
+            # tt_cell.value = 60
+            tt_cell.value = None
+            tt_cell.alignment = self.center
+
+
+
+    
+        """
+        ORTA bloktaki (Westinghouse) SOP tablosunu doldurur.
+        Layout, Zaman Etüdü SOP ile aynı:
+          No | ID | OPERASYON ADIMLARI | ÖNCÜL | VA | NVAN | NVA
+        Süre kaynağı: west_map (Westinghouse için kullandığımız süre haritası).
+        """
+
+        # Bu sefer SOL değil, ORTA blok → başlangıç sütunu = 11
+        sc = 11                   # Westinghouse SOP bandının başlangıç sütunu
+        sr = start_row            # SOP'un başladığı satır (bizde 2)
+        ec = sc + 8
+
+        # _write_sop_band içindeki aynı satır hesapları:
+        h = sr + 11               # tablo başlık satırı (No, ID, ...)
+        n = max(10, adim_sayisi)  # en az 10 satır
+        data_start = h + 1        # ilk operasyon satırı
+        data_end = h + n          # son operasyon satırı
+        toplam_row = h + 1 + n    # "TOPLAM SÜRE" satırı
+
+        # İş adımlarını hazırlayalım
+        steps = job_df.dropna(subset=["AdımID"]).copy()
+        if steps.empty:
+            return
+
+        steps["AdımID"] = steps["AdımID"].astype(int)
+        steps = steps.sort_values("AdımID")
+
+        # DegerTuru -> VA / NVAN / NVA sınıflaması (Zaman Etüdü ile aynı mantık)
+        def _classify(deger):
+            if not isinstance(deger, str):
+                return ""
+            d = deger.strip().upper()
+            if d in ("KD", "VA"):
+                return "VA"
+            if d in ("ZGK", "NVAN", "NVAA", "NV-AN"):
+                return "NVAN"
+            if d in ("KDZ", "NVA"):
+                return "NVA"
+            return ""
+
+        current_row = data_start
+        no = 1
+
+        for _, r in steps.iterrows():
+            if current_row > data_end:
+                break
+
+            adim_id = r.get("AdımID")
+            op_name = r.get("Adım Adı")
+            oncul = r.get("Öncül Adım")
+            cat = _classify(r.get("DegerTuru"))
+
+            # Westinghouse için süre kaynağı: west_map
+            sure = float(west_map.get(adim_id, 0.0) or 0.0)
+
+            va = nv_an = nva = 0.0
+            if cat == "VA":
+                va = sure
+            elif cat == "NVAN":
+                nv_an = sure
+            elif cat == "NVA":
+                nva = sure
+
+            # Hücrelere yaz (ORTA blok, sc=11'den başlıyor)
+            ws.cell(row=current_row, column=sc,     value=no).alignment = self.center    # No
+            ws.cell(row=current_row, column=sc + 1, value=adim_id).alignment = self.center
+            ws.cell(row=current_row, column=sc + 2, value=op_name).alignment = self.left
+            ws.cell(row=current_row, column=sc + 4, value=oncul).alignment = self.center
+            ws.cell(row=current_row, column=sc + 5, value=round(va, 4)).alignment = self.center
+            ws.cell(row=current_row, column=sc + 6, value=round(nv_an, 4)).alignment = self.center
+            ws.cell(row=current_row, column=sc + 7, value=round(nva, 4)).alignment = self.center
+
+            # Kenarlık
+            for col in range(sc, sc + 8):
+                ws.cell(row=current_row, column=col).border = self.thin_border
+
+            no += 1
+            current_row += 1
+
+        # --- TOPLAM SÜRE satırı için formüller (VA / NVAN / NVA) ---
+        if data_start <= data_end:
+            # VA toplamı
+            first_va = ws.cell(row=data_start, column=sc + 5).coordinate
+            last_va  = ws.cell(row=data_end,   column=sc + 5).coordinate
+            ws.cell(
+                row=toplam_row,
+                column=sc + 5,
+                value=f"=SUM({first_va}:{last_va})"
+            ).alignment = self.center
+
+            # NVAN toplamı
+            first_nv = ws.cell(row=data_start, column=sc + 6).coordinate
+            last_nv  = ws.cell(row=data_end,   column=sc + 6).coordinate
+            ws.cell(
+                row=toplam_row,
+                column=sc + 6,
+                value=f"=SUM({first_nv}:{last_nv})"
+            ).alignment = self.center
+
+            # NVA toplamı
+            first_nva = ws.cell(row=data_start, column=sc + 7).coordinate
+            last_nva  = ws.cell(row=data_end,   column=sc + 7).coordinate
+            ws.cell(
+                row=toplam_row,
+                column=sc + 7,
+                value=f"=SUM({first_nva}:{last_nva})"
+            ).alignment = self.center
+
+
+
 
 
 
@@ -1142,25 +1568,51 @@ class MostExcelJobReport:
                 .to_dict()
             )
 
-        # Westinghouse için şimdilik Zaman Etüdü'ne veya MOST'a yaslanıyoruz
-        west_map: Dict = {}
-        if zaman_map:
-            west_map = zaman_map
-        elif most_map:
-            west_map = most_map
+       
+       # -------- CPM için süre haritaları --------
+
+        # 1) Zaman Etüdü haritası (mevcut kodun kalsın)
+
+        # 2) MOST haritası (mevcut kodun kalsın)
+
+        # 3) Westinghouse haritası – ÖNCE StandartZaman, yoksa eskisi gibi fallback
+        west_map: Dict[int, float] = {}
+
+        if not self.west.empty and "StandartZaman" in self.west.columns:
+            # Bu işe ait adımlar:
+            adim_ids = steps_df["AdımID"].dropna().astype(int).unique().tolist()
+            wdf = self.west[self.west["AdımID"].isin(adim_ids)].copy()
+            if not wdf.empty:
+                # Her adım için en son yapılan analizi al
+                wdf = wdf.sort_values(["AdımID", "AnalizID"])
+                last = wdf.groupby("AdımID").tail(1)
+                west_map = last.set_index("AdımID")["StandartZaman"].dropna().astype(float).to_dict()
+
+        # Eğer hâlâ boşsa, eskisi gibi Zaman Etüdü / MOST fallback kullan
+        if not west_map:
+            if zaman_map:
+                west_map = zaman_map
+            elif most_map:
+                west_map = most_map
+
+
+       
+        
+
+        # -------- Zaman Etüdü ve MOST için fallback mantığı --------
 
         # Zaman Etüdü haritası boşsa, en azından MOST'tan doldur
-        if not zaman_map:
-            if most_map:
-                zaman_map = most_map
+        if not zaman_map and most_map:
+            zaman_map = most_map
 
-        # Eğer hâlâ boşsa, tüm adımlar için 0 ver (grafikler bozulmasın)
+        # Hâlâ boşsa, tüm adımlar için 0 ver (grafikler bozulmasın)
         if not zaman_map:
             zaman_map = {aid: 0.0 for aid in steps_df["AdımID"]}
-        if not west_map:
-            west_map = zaman_map
+
+        # MOST boşsa, Zaman Etüdü'ne yaslansın
         if not most_map:
             most_map = zaman_map
+
 
         # -------- Üstte 3 CPM + 3 Gantt (yan yana) --------
                # Bu iş için toplam adım sayısı (SOP satır sayısını belirleyecek)
@@ -1168,6 +1620,30 @@ class MostExcelJobReport:
 
         # -------- Üstte 3 SOP + altında 3 CPM + 3 Gantt --------
         sop_bottom = self._write_sop_triplet(ws, start_row=2, adim_sayisi=adim_sayisi)
+
+
+               # Zaman Etüdü SOP tablosu
+        self._fill_zaman_sop_from_time_study(
+            ws=ws,
+            start_row=2,
+            adim_sayisi=adim_sayisi,
+            job_df=job_df,
+            zaman_map=zaman_map
+        )
+
+               # Westinghouse SOP tablosu -> SADECE west_map doluysa doldur
+        if west_map:
+            self._fill_west_sop_from_westhouse(
+                ws=ws,
+                start_row=2,
+                adim_sayisi=adim_sayisi,
+                job_df=job_df,
+                west_map=west_map
+            )
+        # west_map boşsa: Westinghouse SOP satırları boş kalacak (süre yazmayacağız)
+
+
+
 
         # CPM + Gantt blokları SOP'tan sonra başlasın
         top_row = sop_bottom + 2
@@ -1177,8 +1653,12 @@ class MostExcelJobReport:
 
 
         cpm_time = self._build_cpm_rows_linear(steps_df, zaman_map)
-        cpm_west = self._build_cpm_rows_linear(steps_df, west_map)
         cpm_most = self._build_cpm_rows_linear(steps_df, most_map)
+
+        if west_map:
+            cpm_west = self._build_cpm_rows_linear(steps_df, west_map)
+        else:
+            cpm_west = []  # Westinghouse verisi yoksa CPM+Gantt çizme
 
         end1 = self._write_cpm_and_gantt_block(
             ws, start_row=top_row, col_start=left_col,

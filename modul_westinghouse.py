@@ -293,7 +293,8 @@ class WestinghouseModule(QWidget):
 
         # Sonuçları yeniden hesapla ve göster
         self._guncelle_sonuclari() # Kaydetmeden sadece hesaplama ve gösterim için
-
+   
+   
     def kaydet_ve_hesapla(self):
         if self.current_job_id is None or self.current_step_id is None or self.current_step_id == -1:
             QMessageBox.warning(self, "Hata", "Lütfen önce geçerli bir iş ve adım seçin.")
@@ -304,22 +305,27 @@ class WestinghouseModule(QWidget):
             QMessageBox.warning(self, "Eksik Bilgi", "Kaydetmek için geçerli bir ortalama süre bulunamadı. Lütfen video analiz modülünden ölçüm yapın.")
             return
 
-        # 1. Arayüzdeki tüm verileri topla
-        job_data, _ = self.collect_tolerance_data()
+        # 1) Arayüzdeki tüm verileri topla
+        job_data, toplam_tolerans = self.collect_tolerance_data()
         job_data['Yetenek'] = self.combo_yetenek.currentText()
         job_data['Çaba'] = self.combo_caba.currentText()
         job_data['Çalışma Koşulları'] = self.combo_kosullar.currentText()
         job_data['Tutarlılık'] = self.combo_tutarlilik.currentText()
 
-        # 2. Veriyi kaydet
+        # 2) Normal ve Standart zamanı HESAPLA
+        normal_zaman, standart_zaman = self.perform_calculation(gozlenen_zaman, toplam_tolerans)
+        job_data['NormalZaman'] = normal_zaman
+        job_data['StandartZaman'] = standart_zaman
+
+        # 3) Veriyi kaydet
         try:
             self.data_manager.save_westinghouse_analysis(self.current_job_id, self.current_step_id, job_data)
-            # 3. Sonuçları güncelle ve kullanıcıyı bilgilendir
             self._guncelle_sonuclari()
             QMessageBox.information(self, "Başarılı", "Westinghouse analizi başarıyla kaydedildi.")
         except Exception as e:
             QMessageBox.critical(self, "Kayıt Hatası", f"Analiz kaydedilirken bir hata oluştu: {e}")
-    
+
+
     def collect_tolerance_data(self):
         job_data, total_points = {}, 0
         k_puan = self.kisisel_gereksinim_spinbox.value()
