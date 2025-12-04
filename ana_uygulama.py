@@ -26,7 +26,7 @@ class AnaPencere(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Entegre İş Etüdü Sistemi v0.2.9 (Dinamik Arayüz)")
-        self.setGeometry(50, 50, 1600, 900)
+        self.setGeometry(50, 50, 1800, 1000)
 
         self.data_manager = DataManager()
         self.current_job_id = None
@@ -303,6 +303,85 @@ class JobSelectionDialog(QDialog):
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
+    
+    # --- SUNUM İÇİN ARAYÜZ GÜNCELLEMESİ BAŞLANGIÇ ---
+    # Fusion stili genellikle stillendirmeye (CSS) en iyi yanıt veren stildir.
+    app.setStyle("Fusion") 
+    
+    # Global Stil Tanımlamaları (CSS benzeri)
+    app.setStyleSheet("""
+        /* Tüm Widgetlar için genel yazı tipi */
+        QWidget {
+            font-size: 12pt; /* Yazıları büyüt (Normalde 8-9pt olur) */
+            font-family: 'Segoe UI', Arial, sans-serif;
+        }
+        
+        /* Butonlar: Daha büyük, kalın yazılı ve içi geniş */
+        QPushButton {
+            font-size: 12pt;
+            font-weight: bold;
+            padding: 10px 20px; /* Butonun iç boşluğunu artır */
+            min-height: 40px;   /* Buton yüksekliği en az 40px olsun */
+            border-radius: 5px; /* Hafif yuvarlak köşeler */
+            background-color: #e0e0e0;
+            border: 1px solid #a0a0a0;
+        }
+        QPushButton:hover {
+            background-color: #d0d0d0; /* Üzerine gelince renk değişimi */
+        }
+        QPushButton:pressed {
+            background-color: #b0b0b0;
+        }
+
+        /* Etiketler (Labels) */
+        QLabel {
+            font-size: 12pt;
+            padding: 2px;
+        }
+
+        /* Grup Kutuları (Kutucuk Başlıkları) */
+        QGroupBox {
+            font-weight: bold;
+            font-size: 13pt; 
+            margin-top: 20px;
+            border: 2px solid gray;
+            border-radius: 5px;
+        }
+        QGroupBox::title {
+            subcontrol-origin: margin;
+            left: 10px;
+            padding: 0 5px 0 5px;
+        }
+
+        /* Giriş Alanları ve Açılır Menüler */
+        QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox {
+            padding: 5px;
+            min-height: 30px; /* Tıklama alanı büyüsün */
+            font-size: 12pt;
+        }
+        
+        /* Tab (Sekme) Başlıkları */
+        QTabBar::tab {
+            font-size: 12pt;
+            font-weight: bold;
+            padding: 10px 25px;
+            min-width: 120px;
+        }
+        
+        /* Liste ve Tablo Elemanları */
+        QListWidget, QTableWidget {
+            font-size: 12pt;
+        }
+        QHeaderView::section {
+            font-size: 12pt;
+            font-weight: bold;
+            padding: 5px;
+        }
+    """)
+    # --- SUNUM İÇİN ARAYÜZ GÜNCELLEMESİ BİTİŞ ---
+
     pencere = AnaPencere()
-    pencere.show()
+    # Pencereyi tam ekran başlatmak sunumda daha etkileyici olabilir (İsteğe bağlı)
+    pencere.showMaximized() 
+    
     sys.exit(app.exec_())

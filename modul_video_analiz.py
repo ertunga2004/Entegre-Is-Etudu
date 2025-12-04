@@ -396,7 +396,10 @@ class VideoPlayerPanel(QWidget):
         self.play_pause_button.setIcon(self.play_icon)
         self.forward_button = QPushButton("5s >>"); self.forward_button.setEnabled(False)
         self.speed_combo = QComboBox(); self.speed_combo.addItems(["0.5x", "1.0x", "1.5x", "2.0x"]); self.speed_combo.setCurrentIndex(1); self.speed_combo.setEnabled(False)
-        self.measure_button = QPushButton("Ölçümü Başlat"); self.measure_button.setEnabled(False)
+        self.measure_button = QPushButton("Ölçümü Başlat")
+        self.measure_button.setEnabled(False)
+        # Bu butonu sunumda vurgulamak için ekstra büyütelim
+        self.measure_button.setStyleSheet("font-size: 14pt; font-weight: bold; padding: 15px; background-color: #3498db; color: white;")
 
         controls_layout.addWidget(self.time_label, 0, 0, 1, 4)
         controls_layout.addWidget(self.video_slider, 1, 0, 1, 4)
