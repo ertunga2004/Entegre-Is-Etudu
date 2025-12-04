@@ -2,7 +2,7 @@ from PyQt5.QtWidgets import (QWidget, QLabel, QPushButton, QComboBox, QFileDialo
                              QHBoxLayout, QVBoxLayout, QTableWidget, QTableWidgetItem,
                              QGroupBox, QInputDialog, QMessageBox, QSlider, QAbstractItemView,
                              QDialog, QFormLayout, QLineEdit, QListWidget, QListWidgetItem,
-                             QStyle, QGridLayout)
+                             QStyle, QGridLayout, QHeaderView)
 from PyQt5.QtGui import QImage, QPixmap
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal
 import cv2
@@ -118,7 +118,27 @@ class JobManagementPanel(QWidget):
         steps_group = QGroupBox("İş Adımları")
         steps_layout = QVBoxLayout(steps_group)
         self.steps_table = QTableWidget(); self.steps_table.setColumnCount(6)
-        self.steps_table.setHorizontalHeaderLabels(["AdımID", "Adım Adı", "İş İstasyonu", "Ort. Süre (sn)", "Öncül Ad(lar)ı", "Değer Türü"])
+        
+        # --- GÜNCELLEME: Başlıkları \n ile alt satıra indirdik ---
+        self.steps_table.setHorizontalHeaderLabels([
+            "Adım\nID", 
+            "Adım\nAdı", 
+            "İş\nİstasyonu", 
+            "Ort. Süre\n(sn)", 
+            "Öncül\nAd(lar)ı", 
+            "Değer\nTürü"
+        ])
+        
+        # --- GÜNCELLEME: Başlık yüksekliğini ayarlama ---
+        header = self.steps_table.horizontalHeader()
+        header.setFixedHeight(60) # Başlık yüksekliğini artırdık (2 satır sığsın diye)
+        
+        # Sütunların ekrana yayılmasını sağla (Geniş görünüm için)
+        header.setSectionResizeMode(QHeaderView.Stretch)
+        
+        # "Adım ID" sütunu çok geniş olmasın, içeriği kadar olsun yeter
+        header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        
         self.steps_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.steps_table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.steps_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
