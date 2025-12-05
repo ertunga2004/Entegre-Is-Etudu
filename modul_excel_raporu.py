@@ -1,4 +1,3 @@
-
 import re
 from typing import Dict, List, Tuple
 from pathlib import Path
@@ -7,7 +6,9 @@ import pandas as pd
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill, Border, Side
 from openpyxl.utils import get_column_letter
-from openpyxl.chart import BarChart, Reference
+# Series ve ChartLines buraya eklendi
+from openpyxl.chart import BarChart, Reference, Series
+from openpyxl.chart.axis import ChartLines
 from openpyxl.worksheet.hyperlink import Hyperlink
 from openpyxl.chart.label import DataLabelList
 from openpyxl.chart.series import SeriesLabel
@@ -1544,12 +1545,11 @@ class MostExcelJobReport:
 
     def _build_cpm_rows_linear(self, steps_df: pd.DataFrame, durations_map: Dict) -> List[Dict]:
         """
-        CSV'deki 'Öncül Adım' kolonunu kullanarak gerçek bir CPM tablosu hesaplar.
-        Bir adım birden fazla öncül alabilir (örn. '1,2').
+        CPM tablosunu hesaplar ve 'DegerTuru' bilgisini de içerir.
+        Sonuçları Erken Başlama (ES) süresine göre sıralar (Gantt şelalesi için).
         """
         from collections import deque
 
-        # --- Adım ve süre hazırlığı ---
         steps = steps_df.dropna(subset=["AdımID"]).copy()
         if steps.empty:
             return []
@@ -1560,7 +1560,7 @@ class MostExcelJobReport:
         # Süre haritası
         duration = {aid: float(durations_map.get(aid, 0.0) or 0.0) for aid in ids}
 
-        # --- Öncelik (preds) ve ardıllar (succs) ---
+        # Öncelik ve ardıllar
         preds: Dict[int, List[int]] = {}
         succs: Dict[int, List[int]] = {aid: [] for aid in ids}
         indegree: Dict[int, int] = {aid: 0 for aid in ids}
@@ -1569,7 +1569,6 @@ class MostExcelJobReport:
             aid = int(row["AdımID"])
             raw_pred = row.get("Öncül Adım", "")
             plist = _parse_predecessors(raw_pred)
-            # sadece bu işteki adımlardan olanları al
             plist = [p for p in plist if p in ids]
             preds[aid] = plist
 
@@ -1578,10 +1577,9 @@ class MostExcelJobReport:
                 succs.setdefault(p, []).append(aid)
                 indegree[aid] += 1
 
-        # --- Topolojik sıralama (Kahn algoritması) ---
+        # Topolojik sıralama
         q = deque([aid for aid in ids if indegree[aid] == 0])
         topo: List[int] = []
-
         while q:
             n = q.popleft()
             topo.append(n)
@@ -1590,12 +1588,10 @@ class MostExcelJobReport:
                 if indegree[s] == 0:
                     q.append(s)
 
-        # Olası döngü/eksik tanım durumunda kalanlar
         for aid in ids:
-            if aid not in topo:
-                topo.append(aid)
+            if aid not in topo: topo.append(aid)
 
-        # --- İleri geçiş (ES / EF) ---
+        # İleri geçiş (ES / EF)
         ES: Dict[int, float] = {aid: 0.0 for aid in ids}
         EF: Dict[int, float] = {}
 
@@ -1609,22 +1605,19 @@ class MostExcelJobReport:
 
         project_duration = max(EF.values()) if EF else 0.0
 
-        # --- Geri geçiş (LS / LF) ---
+        # Geri geçiş (LS / LF)
         LS: Dict[int, float] = {}
         LF: Dict[int, float] = {}
-
-        # Son adımlar: ardılı olmayanlar
+        
         last_activities = [aid for aid in ids if not succs.get(aid)]
         for aid in last_activities:
             LF[aid] = project_duration
             LS[aid] = project_duration - duration[aid]
 
         for aid in reversed(topo):
-            if aid in LS:  # yukarıda ayarlandı
-                continue
+            if aid in LS: continue
             succ_list = succs.get(aid, [])
             if succ_list:
-                # Ardılların LS'lerinden en küçüğü
                 ls_candidates = [LS[s] for s in succ_list if s in LS]
                 lf_val = min(ls_candidates) if ls_candidates else project_duration
             else:
@@ -1632,51 +1625,54 @@ class MostExcelJobReport:
             LF[aid] = lf_val
             LS[aid] = lf_val - duration[aid]
 
-        # --- Sonuç satırları ---
         rows: List[Dict] = []
-        for _, row in steps.sort_values("AdımID").iterrows():
+        for _, row in steps.iterrows():
             aid = int(row["AdımID"])
-            name = row.get("Adım Adı", "") or ""
-            pred_list = preds.get(aid, [])
-            pred_str = ",".join(str(p) for p in pred_list)
-
-            es = ES.get(aid, 0.0)
-            ef = EF.get(aid, es + duration[aid])
-            ls = LS.get(aid, es)
-            lf = LF.get(aid, ef)
-            slack = ls - es
-
+            
+            # --- DÜZELTME BURADA YAPILDI ---
+            # Değerleri önce değişkenlere alıp, undefined hatasını önlüyoruz.
+            current_es = ES.get(aid, 0.0)
+            current_ef = EF.get(aid, current_es + duration[aid])
+            current_ls = LS.get(aid, current_es)
+            current_lf = LF.get(aid, current_ef)
+            current_slack = current_ls - current_es
+            
             rows.append({
                 "AdımID": aid,
-                "Adım Adı": name,
-                "Öncül": pred_str,
+                "Adım Adı": row.get("Adım Adı", "") or "",
+                "Öncül": ",".join(str(p) for p in preds.get(aid, [])),
                 "Süre": duration[aid],
-                "ES": es,
-                "EF": ef,
-                "LS": ls,
-                "LF": lf,
-                "Bolluk": slack,
+                "ES": current_es,
+                "EF": current_ef,
+                "LS": current_ls,
+                "LF": current_lf,
+                "Bolluk": current_slack,
+                "DegerTuru": str(row.get("DegerTuru", "")).strip().upper()
             })
 
+        # Listeyi Erken Başlama (ES) zamanına göre sırala -> Gantt'ta şelale görünümü için
+        rows.sort(key=lambda x: (x["ES"], x["AdımID"]))
+        
         return rows
 
     def _write_cpm_and_gantt_block(self, ws, start_row: int, col_start: int,
                                    title: str, cpm_rows: List[Dict]) -> int:
         """
-        Tek blok: Üstte CPM tablosu, altında Gantt veri tablosu + stacked bar chart.
-        Geri dönüş: kullanılan son satır numarası.
+        Üstte CPM verileri, altta GANTT Şeması oluşturur.
+        Gantt şeması: 
+        - İlk iş en üstte (şelale yapısı).
+        - Sadece süre çubukları görünür (başlangıç kısmı şeffaf).
+        - Çubuklar VA (Yeşil), NVAN (Sarı), NVA (Kırmızı) olarak renklendirilir.
         """
         if not cpm_rows:
             return start_row
 
-        headers = ["AdımID", "Adım Adı", "Öncül Adım", "Süre (sn)",
-                   "ES", "EF", "LS", "LF", "Bolluk"]
+        # --- 1. CPM VERİ TABLOSU ---
+        headers = ["AdımID", "Adım Adı", "Öncül Adım", "Süre (sn)", "ES", "EF", "LS", "LF", "Bolluk"]
         end_col = col_start + len(headers) - 1
 
-        # ---------- CPM TABLOSU ----------
         title_cell = ws.cell(row=start_row, column=col_start, value=title)
-        ws.merge_cells(start_row=start_row, start_column=col_start,
-                       end_row=start_row, end_column=end_col)
+        ws.merge_cells(start_row=start_row, start_column=col_start, end_row=start_row, end_column=end_col)
         title_cell.font = self.header_font
         title_cell.alignment = self.center
 
@@ -1705,82 +1701,108 @@ class MostExcelJobReport:
 
         last_cpm_row = data_start + len(cpm_rows) - 1
 
-        # ---------- GANTT TABLOSU ----------
-        gantt_title_row = last_cpm_row + 2
-        gt_cell = ws.cell(row=gantt_title_row, column=col_start,
-                          value=title.replace("CPM", "Gantt").strip())
-        ws.merge_cells(start_row=gantt_title_row, start_column=col_start,
-                       end_row=gantt_title_row, end_column=col_start + 4)
-        gt_cell.font = self.header_font
-        gt_cell.alignment = self.center
+        # --- 2. GANTT VERİ HAZIRLIĞI (Stacked Bar Mantığı) ---
+        # Excel'de Gantt yapmak için:
+        # Seri 1: Başlangıç (ES) -> Şeffaf/Görünmez yapılır (Barı sağa iter)
+        # Seri 2: VA Süresi -> Yeşil
+        # Seri 3: NVAN Süresi -> Sarı
+        # Seri 4: NVA Süresi -> Kırmızı
+        
+        gantt_data_start_row = last_cpm_row + 3
+        
+        # Başlıklar (Grafik kaynağı olacak gizli tablo)
+        g_headers = ["Adım Adı", "Başlangıç (ES)", "VA", "NVAN", "NVA"]
+        for i, h in enumerate(g_headers):
+            ws.cell(row=gantt_data_start_row, column=col_start + i, value=h)
 
-        table_header_row = gantt_title_row + 1
-
-        # Adım Adı | Başlangıç (ES) | Süre (sn)
-        ws.cell(row=table_header_row, column=col_start,     value="Adım Adı").font = self.header_font
-        ws.cell(row=table_header_row, column=col_start + 1, value="Başlangıç (ES)").font = self.header_font
-        ws.cell(row=table_header_row, column=col_start + 2, value="Süre (sn)").font = self.header_font
-
+        # Verileri ayrıştırarak yaz
         for idx, row in enumerate(cpm_rows):
-            rr = table_header_row + 1 + idx
-            ws.cell(row=rr, column=col_start,     value=row["Adım Adı"])
+            rr = gantt_data_start_row + 1 + idx
+            
+            # Adım Adı (Y Ekseni Etiketi)
+            ws.cell(row=rr, column=col_start, value=row["Adım Adı"])
+            
+            # Başlangıç Zamanı (Görünmez Olacak Seri)
             ws.cell(row=rr, column=col_start + 1, value=row["ES"])
-            ws.cell(row=rr, column=col_start + 2, value=row["Süre"])
+            
+            # Süreyi Değer Türüne Göre İlgili Sütuna Yaz, Diğerlerine 0 Yaz
+            sure = row["Süre"]
+            d_turu = row["DegerTuru"]
+            
+            va_val = sure if d_turu in ("VA", "KD") else 0
+            nvan_val = sure if d_turu in ("NVAN", "ZGK", "NVAA") else 0
+            nva_val = sure if d_turu in ("NVA", "KDZ", "KDS") else 0
+            
+            # Eğer tür belirtilmemişse varsayılan olarak NVA kabul edelim (ya da tercihe göre VA)
+            if va_val == 0 and nvan_val == 0 and nva_val == 0:
+                nva_val = sure
 
-        # ---------- STACKED BAR (MOST ekranındaki stil) ----------
+            ws.cell(row=rr, column=col_start + 2, value=va_val)   # VA (Yeşil)
+            ws.cell(row=rr, column=col_start + 3, value=nvan_val) # NVAN (Sarı)
+            ws.cell(row=rr, column=col_start + 4, value=nva_val)  # NVA (Kırmızı)
+
+        # --- 3. GANTT GRAFİĞİNİ OLUŞTURMA ---
         chart = BarChart()
-        chart.type = "bar"
-        chart.grouping = "stacked"
+        chart.type = "bar"      # Yatay Çubuk
+        chart.grouping = "stacked" # Yığılmış
         chart.overlap = 100
-        chart.y_axis.number_format = "0%"
-        chart.y_axis.scaling.min = 0
-        chart.y_axis.scaling.max = 1
+        chart.title = title.replace("CPM + Gantt", "Gantt Şeması")
+        chart.style = 10 # Genel stil
+        
+        # --- Seri Tanımları ---
+        data_rows_count = len(cpm_rows)
+        
+        # X Ekseni (Kategoriler: Adım Adları)
+        cats = Reference(ws, min_col=col_start, min_row=gantt_data_start_row+1, max_row=gantt_data_start_row+data_rows_count)
+        chart.set_categories(cats)
 
-        chart.title = title
+        # 1. Seri: Başlangıç (ES) -> GÖRÜNMEZ YAP (No Fill)
+        es_data = Reference(ws, min_col=col_start+1, min_row=gantt_data_start_row, max_row=gantt_data_start_row+data_rows_count)
+        s_es = Series(es_data, title_from_data=True)
+        s_es.graphicalProperties.noFill = True # Dolgu yok, sadece öteleme sağlar
+        chart.series.append(s_es)
+
+        # 2. Seri: VA (Yeşil)
+        va_data = Reference(ws, min_col=col_start+2, min_row=gantt_data_start_row, max_row=gantt_data_start_row+data_rows_count)
+        s_va = Series(va_data, title_from_data=True)
+        s_va.graphicalProperties.solidFill = "00B050" # Yeşil
+        s_va.graphicalProperties.line.noFill = True
+        chart.series.append(s_va)
+
+        # 3. Seri: NVAN (Sarı)
+        nvan_data = Reference(ws, min_col=col_start+3, min_row=gantt_data_start_row, max_row=gantt_data_start_row+data_rows_count)
+        s_nvan = Series(nvan_data, title_from_data=True)
+        s_nvan.graphicalProperties.solidFill = "FFFF00" # Sarı
+        s_nvan.graphicalProperties.line.noFill = True
+        chart.series.append(s_nvan)
+
+        # 4. Seri: NVA (Kırmızı)
+        nva_data = Reference(ws, min_col=col_start+4, min_row=gantt_data_start_row, max_row=gantt_data_start_row+data_rows_count)
+        s_nva = Series(nva_data, title_from_data=True)
+        s_nva.graphicalProperties.solidFill = "FF0000" # Kırmızı
+        s_nva.graphicalProperties.line.noFill = True
+        chart.series.append(s_nva)
+
+        # --- Grafik Ayarları ---
+        # Y Ekseni (İşler): Ters sırala ki ilk iş en üstte olsun
+        chart.y_axis.scaling.orientation = "maxMin" 
+        chart.y_axis.majorTickMark = "out"
+        
+        # X Ekseni (Zaman): Izgara çizgileri
+        from openpyxl.chart.axis import ChartLines
+        chart.x_axis.majorGridlines = ChartLines() # Dikey zaman çizgileri
+        chart.x_axis.title = "Zaman (sn)"
+        
+        # Boyut ve Konum
+        chart.height = 10 + (data_rows_count * 0.5) # İş sayısına göre yükseklik
+        chart.width = 18
+        
+        anchor_cell = f"{get_column_letter(col_start)}{gantt_data_start_row + data_rows_count + 2}"
+        ws.add_chart(chart, anchor_cell)
+
+        return gantt_data_start_row + data_rows_count + 20 # Sonraki içerik için boşluk
 
 
-        # Veri: ES + Süre
-        data_ref = Reference(
-            ws,
-            min_col=col_start + 1,          # ES
-            max_col=col_start + 2,          # Süre
-            min_row=table_header_row,       # başlık satırı dahil
-            max_row=table_header_row + len(cpm_rows)
-        )
-
-        # Kategoriler: Adım adları (sol eksen)
-        cats_ref = Reference(
-            ws,
-            min_col=col_start,
-            max_col=col_start,
-            min_row=table_header_row + 1,
-            max_row=table_header_row + len(cpm_rows)
-        )
-
-        chart.add_data(data_ref, titles_from_data=True)
-        chart.set_categories(cats_ref)
-
-        # Ekseni sade bırak (Excel varsayılan ayarları adım adlarını gösterir)
-        chart.y_axis.title = None
-        chart.x_axis.title = None
-
-
-
-        chart.height = 7
-        chart.width = 12
-
-        anchor_col_letter = get_column_letter(col_start + 4)
-        anchor_row = table_header_row + 1
-        ws.add_chart(chart, f"{anchor_col_letter}{anchor_row}")
-
-        return table_header_row + 1 + len(cpm_rows)
-
-
-
-
-    # ------------ Tek Sayfa Yazımı (bir İş Adı) ------------
-
-        # ------------ Tek Sayfa Yazımı (bir İş Adı) ------------
 
     def _write_sheet_for_job(self, wb: Workbook, job_name: str, job_df: pd.DataFrame):
         ws = wb.create_sheet(self._safe_sheet_name(job_name))
@@ -1790,10 +1812,9 @@ class MostExcelJobReport:
         if not adim_ids:
             return
 
-        # Adım listesi (CPM için)
-        # Adım listesi (CPM için) – Öncül Adım kolonunu da al
+        # Adım listesi (CPM için) – Öncül Adım ve DegerTuru kolonlarını al
         steps_df = (
-            job_df[["AdımID", "Adım Adı", "Öncül Adım"]]
+            job_df[["AdımID", "Adım Adı", "Öncül Adım", "DegerTuru"]]
             .dropna(subset=["AdımID"])
             .drop_duplicates()
         )
