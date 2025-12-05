@@ -1,5 +1,3 @@
-# modul_most_secici.py
-
 import sys
 from PyQt5.QtWidgets import (
     QWidget, QLabel, QPushButton, QVBoxLayout, QHBoxLayout, QMessageBox,

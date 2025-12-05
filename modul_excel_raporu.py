@@ -1,5 +1,3 @@
-# modul_excel_raporu.py
-# -*- coding: utf-8 -*-
 import re
 from typing import Dict, List, Tuple
 from pathlib import Path

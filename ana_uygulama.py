@@ -1,5 +1,3 @@
-# ana_uygulama.py
-# -*- coding: utf-8 -*-
 import sys
 from datetime import datetime
 

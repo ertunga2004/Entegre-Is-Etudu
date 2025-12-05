@@ -1,17 +1,14 @@
-# modul_basic_most.py (Sadeleştirilmiş Versiyon)
-
 import sys
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QScrollArea,
-    QSpinBox,QFormLayout, QMessageBox, QComboBox, QTabWidget
+    QSpinBox, QFormLayout, QMessageBox, QComboBox, QTabWidget, QGroupBox, QSizePolicy
 )
 from PyQt5.QtCore import Qt, pyqtSignal
 
 class BasicMostModule(QWidget):
     """
-    Sadece kullanılan BasicMOST modülünü içeren sadeleştirilmiş sınıf.
-    Dosyanın önceki versiyonundaki BaseMostTab ve türevleri (GeneralMoveTab vb.) 
-    ana uygulama tarafından kullanılmadığı için kaldırılmıştır.
+    Sadece kullanılan BasicMOST modülünü içeren, arayüzü MaxiMOST'a benzetilmiş sınıf.
+    Her parametre kendi grubu içinde (Tekrar, Seçim, Değer) şeklinde listelenir.
     """
     back_button_pressed = pyqtSignal()
 
@@ -41,10 +38,13 @@ class BasicMostModule(QWidget):
 
     def initUI(self):
         main_layout = QVBoxLayout(self)
+        
+        # Üst Bilgi Alanı
         self.job_info_label = QLabel("Değerlendirme için Video Analizi ekranından bir iş ve adım seçin.")
         self.job_info_label.setStyleSheet("font-weight: bold; margin-bottom: 10px;")
         main_layout.addWidget(self.job_info_label)
 
+        # Geri Dön Butonu
         back_button_layout = QHBoxLayout()
         back_button = QPushButton("← Analiz Menüsüne Dön")
         back_button.clicked.connect(self.back_button_pressed.emit)
@@ -52,6 +52,7 @@ class BasicMostModule(QWidget):
         back_button_layout.addStretch()
         main_layout.addLayout(back_button_layout)
 
+        # Sekmeler
         self.tabs = QTabWidget()
         main_layout.addWidget(self.tabs)
 
@@ -66,44 +67,100 @@ class BasicMostModule(QWidget):
         self.parameter_widgets = {}
 
         for model_name, params in models.items():
-            tab = QWidget()
-            form_layout = QFormLayout(tab)
-
-            group_box_data = {'combos': {}, 'repeats': {}}
+            # Her sekme için bir ScrollArea oluştur (İçerik taşarsa kaydırılabilsin)
+            scroll = QScrollArea()
+            scroll.setWidgetResizable(True)
             
-            general_repeat_spin = QSpinBox(); general_repeat_spin.setRange(1, 100); form_layout.addRow("Genel Tekrar:", general_repeat_spin)
+            tab_content = QWidget()
+            tab_layout = QVBoxLayout(tab_content)
+            tab_layout.setSpacing(15) # Gruplar arası boşluk
+            tab_layout.setAlignment(Qt.AlignTop)
+
+            # Verileri saklamak için sözlük
+            group_box_data = {'combos': {}, 'repeats': {}, 'labels': {}}
+            
+            # --- 1. Genel Tekrar Kısmı (En Üstte) ---
+            general_group = QGroupBox("Genel Ayarlar")
+            gen_layout = QFormLayout(general_group)
+            general_repeat_spin = QSpinBox()
+            general_repeat_spin.setRange(1, 1000)
+            # Daha büyük ve belirgin olması için stil
+            general_repeat_spin.setStyleSheet("font-size: 11pt; font-weight: bold;")
+            gen_layout.addRow("Genel Tekrar Sayısı:", general_repeat_spin)
+            
+            tab_layout.addWidget(general_group)
             group_box_data['general_repeat'] = general_repeat_spin
 
+            # --- 2. Parametre Grupları ---
             for param_code, options in params.items():
+                # Her parametre için bir GroupBox
+                param_group = QGroupBox(f"{param_code} Parametresi")
+                param_group.setStyleSheet("QGroupBox { font-weight: bold; border: 1px solid gray; border-radius: 5px; margin-top: 10px; } QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 3px 0 3px; }")
+                
+                # İç düzen
+                group_layout = QFormLayout(param_group)
+                group_layout.setContentsMargins(10, 15, 10, 10)
+                
+                # Tekrar Sayısı (En Üstte)
+                repeat_spin = QSpinBox()
+                repeat_spin.setRange(1, 1000)
+                group_layout.addRow(f"{param_code} Tekrar Sayısı:", repeat_spin)
+                
+                # Seçim Kutusu (Ortada)
                 combo = QComboBox()
-                repeat_spin = QSpinBox(); repeat_spin.setRange(1, 100)
-                
-                combo.addItem("-- Seçiniz --", 0) # Başlangıç seçeneği ve değeri
+                combo.addItem("-- Seçiniz --", 0) # Başlangıç seçeneği
                 for desc, val in options.items():
-                    combo.addItem(f"{desc} ({val})", val) 
+                    combo.addItem(f"{desc} ({val})", val)
+                group_layout.addRow(f"{param_code} (Seçim):", combo)
                 
-                form_layout.addRow(f"{param_code} Parametresi:", combo)
-                form_layout.addRow(f"{param_code} Tekrar:", repeat_spin)
+                # Değer Etiketi (En Altta)
+                value_label = QLabel(f"{param_code} Değeri: 0")
+                value_label.setStyleSheet("color: #333; font-style: italic;")
+                group_layout.addRow(value_label)
                 
+                # Widget'ları ana layout'a ekle
+                tab_layout.addWidget(param_group)
+                
+                # Referansları sakla
                 group_box_data['combos'][param_code] = combo
                 group_box_data['repeats'][param_code] = repeat_spin
+                group_box_data['labels'][param_code] = value_label
                 
+                # Sinyaller
                 combo.currentIndexChanged.connect(self.updateResult)
                 repeat_spin.valueChanged.connect(self.updateResult)
             
+            # Genel tekrar değişince de hesapla
             general_repeat_spin.valueChanged.connect(self.updateResult)
-            self.tabs.addTab(tab, model_name)
+            
+            scroll.setWidget(tab_content)
+            self.tabs.addTab(scroll, model_name)
             self.parameter_widgets[model_name] = group_box_data
         
-        # Sonuç etiketlerini en alta ekle
-        self.tmu_label = QLabel("Toplam TMU: 0")
-        self.saniye_label = QLabel("Toplam Saniye: 0.00")
-        self.kodlama_label = QLabel("Kodlama: ")
-        self.kaydet_btn = QPushButton("Analizi Kaydet")
+        # Alt Kısım: Sonuçlar ve Kaydet Butonu
+        results_group = QGroupBox("Sonuçlar")
+        results_layout = QHBoxLayout(results_group)
         
-        main_layout.addWidget(self.tmu_label)
-        main_layout.addWidget(self.saniye_label)
+        self.tmu_label = QLabel("Toplam TMU: 0")
+        self.tmu_label.setStyleSheet("font-weight: bold; font-size: 10pt;")
+        
+        self.saniye_label = QLabel("Toplam Saniye: 0.00")
+        self.saniye_label.setStyleSheet("font-weight: bold; font-size: 10pt; color: blue;")
+        
+        results_layout.addWidget(self.tmu_label)
+        results_layout.addSpacing(20)
+        results_layout.addWidget(self.saniye_label)
+        results_layout.addStretch()
+        
+        main_layout.addWidget(results_group)
+        
+        self.kodlama_label = QLabel("Kodlama: ")
+        self.kodlama_label.setWordWrap(True)
+        self.kodlama_label.setStyleSheet("background-color: #f0f0f0; padding: 5px; border: 1px solid #ccc;")
         main_layout.addWidget(self.kodlama_label)
+        
+        self.kaydet_btn = QPushButton("Analizi Kaydet")
+        self.kaydet_btn.setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold; padding: 10px;")
         main_layout.addWidget(self.kaydet_btn)
 
         self.kaydet_btn.clicked.connect(self._kaydet_analiz)
@@ -120,12 +177,23 @@ class BasicMostModule(QWidget):
             model_coding = []
             
             for param_code, combo in group_box['combos'].items():
+                value = 0
                 if combo.currentIndex() > 0:
                     value = combo.currentData() or 0
+                
+                # Değer etiketini güncelle (Örn: "A Değeri: 6")
+                group_box['labels'][param_code].setText(f"{param_code} Değeri: {value}")
+                
+                if combo.currentIndex() > 0:
                     repeat = group_box['repeats'][param_code].value()
-                    
                     model_tmu += value * repeat
-                    model_coding.append(f"{param_code[0]}<sub>{value}</sub>" if repeat == 1 else f"{param_code[0]}({repeat})<sub>{value}</sub>")
+                    
+                    # Kodlama formatı: A(2)6 veya A6 (tekrar 1 ise)
+                    val_sub = f"<sub>{value}</sub>"
+                    if repeat > 1:
+                        model_coding.append(f"{param_code}({repeat}){val_sub}")
+                    else:
+                        model_coding.append(f"{param_code}{val_sub}")
 
             general_repeat = group_box['general_repeat'].value()
             total_tmu = model_tmu * general_repeat
@@ -136,19 +204,26 @@ class BasicMostModule(QWidget):
                     full_code = f"({full_code}) * {general_repeat}"
                 coding_parts.append(full_code)
 
-        self.tmu_label.setText(f"Toplam TMU: {total_tmu}")
-        self.saniye_label.setText(f"Toplam Saniye: {total_tmu * 0.036:.2f}")
+        # Sonuçları Güncelle
+        self.tmu_label.setText(f"Toplam TMU: {total_tmu * 10}") # TMU genellikle 10 ile çarpılır (BasicMOST kuralı)
+        # Saniye hesabı: (TMU * 10) * 0.036
+        total_seconds = (total_tmu * 10) * 0.036
+        self.saniye_label.setText(f"Toplam Saniye: {total_seconds:.2f}")
         self.kodlama_label.setText("Kodlama: " + " ".join(coding_parts))
 
-    def set_enabled_state(self, enabled): self.tabs.setEnabled(enabled)
+    def set_enabled_state(self, enabled): 
+        self.tabs.setEnabled(enabled)
+        self.kaydet_btn.setEnabled(enabled)
 
     def load_step_data(self, job_id, step_id):
         self.current_job_id = job_id
         self.current_step_id = step_id
+        
         if job_id is None or step_id is None or step_id == -1:
             self.set_enabled_state(False)
             self.job_info_label.setText("Değerlendirme için bir İş ve Adım seçin.")
             return
+            
         try:
             job_list = self.data_manager.get_job_list()
             steps_list = self.data_manager.get_steps_for_job(job_id)
@@ -159,6 +234,7 @@ class BasicMostModule(QWidget):
         except Exception as e:
             self.set_enabled_state(False)
             self.job_info_label.setText("İş/Adım bilgileri yüklenirken bir hata oluştu.")
+            print(f"Hata: {e}")
 
     def _kaydet_analiz(self):
         if self.current_job_id is None or self.current_step_id is None:
@@ -181,7 +257,8 @@ class BasicMostModule(QWidget):
         genel_tekrar = group_box['general_repeat'].value()
         detaylar.append({'kod': 'GenelTekrar', 'deger': '', 'tekrar': genel_tekrar}) # Genel tekrarı da kaydet
         
-        nihai_tmu = toplam_model_tmu * genel_tekrar
+        # Nihai Hesaplama (BasicMOST'ta indeks toplamı genellikle 10 ile çarpılır)
+        nihai_tmu = toplam_model_tmu * genel_tekrar * 10 
         nihai_saniye = nihai_tmu * 0.036
         
         if not detaylar or all(d['kod'] == 'GenelTekrar' for d in detaylar):

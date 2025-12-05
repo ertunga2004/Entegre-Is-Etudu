@@ -1,4 +1,3 @@
-# modul_kullanici.py
 import os, hashlib, pandas as pd
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QMessageBox
