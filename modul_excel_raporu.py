@@ -1,3 +1,4 @@
+
 import re
 from typing import Dict, List, Tuple
 from pathlib import Path
@@ -8,6 +9,9 @@ from openpyxl.styles import Alignment, Font, PatternFill, Border, Side
 from openpyxl.utils import get_column_letter
 from openpyxl.chart import BarChart, Reference
 from openpyxl.worksheet.hyperlink import Hyperlink
+from openpyxl.chart.label import DataLabelList
+from openpyxl.chart.series import SeriesLabel
+
 
 
 
@@ -484,6 +488,146 @@ class MostExcelJobReport:
 
         return d
     
+    def _add_percent_chart_for_sop_band(self, ws, start_row, start_col, adim_sayisi, anchor_offset_cols=9):
+        """
+        Tek bir SOP bandı (Zaman Etüdü / Westinghouse / MOST) için
+        VA–NVAN–NVA yüzdelerini gösteren %100 yığılmış sütun grafiği ekler.
+
+        start_row : SOP bandının başladığı satır (bizde 2)
+        start_col : SOP bandının başladığı sütun (Zaman=1, West=11, MOST=21)
+        """
+        sr = start_row
+        sc = start_col
+
+        # _write_sop_band içindeki ile aynı mantık:
+        # h = sr + 11 -> VA/NVAN/NVA başlık satırı
+        # n = max(10, adim_sayisi)
+        # t = h + 1 + n -> "toplam süre" satırı
+        h = sr + 11
+        n = max(10, adim_sayisi)
+        t = h + 1 + n  # toplam satır
+
+        # Toplam hücreleri (VA / NVAN / NVA)
+        va_cell   = ws.cell(row=t, column=sc + 5)
+        nvan_cell = ws.cell(row=t, column=sc + 6)
+        nva_cell  = ws.cell(row=t, column=sc + 7)
+
+        # Tamamen boşsa grafik üretme
+        if all(c.value in (None, "", 0) for c in (va_cell, nvan_cell, nva_cell)):
+            return
+
+        chart = BarChart()
+        chart.type = "col"
+        chart.grouping = "percentStacked"
+        chart.overlap = 100
+
+        # Yüzdelik eksen görünümü
+        chart.y_axis.number_format = "0%"   # 0% 10% 20% ... 100%
+        chart.y_axis.scaling.min = 0
+        chart.y_axis.scaling.max = 1
+        chart.y_axis.majorUnit = 0.1        # 10'ar 10'ar artsın
+        chart.y_axis.tickLblPos = "nextTo"  # etiketleri göster
+
+        chart.y_axis.number_format = "0%"
+        chart.y_axis.scaling.min = 0
+        chart.y_axis.scaling.max = 1
+
+        # Veriler: sadece toplamların olduğu satır
+        data = Reference(
+            ws,
+            min_col=sc + 5,   # VA
+            max_col=sc + 7,   # NVA
+            min_row=t,
+            max_row=t
+        )
+        chart.add_data(data, titles_from_data=False)
+        from openpyxl.chart.label import DataLabelList  # en üst importlarda da var olsun
+
+        chart.dataLabels = DataLabelList()
+        chart.dataLabels.showVal = True          # sadece sayıyı yaz
+        chart.dataLabels.showSerName = False     # VA (sn) yazma
+        chart.dataLabels.showCatName = False     # "toplam süre" yazma
+        chart.dataLabels.showLegendKey = False
+        chart.dataLabels.showPercent = False
+        
+
+        # --- Seri isimleri (VA / NVAN / NVA) ---
+        for i, s in enumerate(chart.series):
+            label = SeriesLabel()
+            label.v = ws.cell(row=h, column=sc + 5 + i).value
+            s.title = label
+
+            # Renkler: VA=yeşil, NVAN=sarı, NVA=kırmızı
+            if i == 0:      # VA
+                s.graphicalProperties.solidFill = "00B050"   # yeşil
+            elif i == 1:    # NVAN
+                s.graphicalProperties.solidFill = "FFFF00"   # sarı
+            else:           # NVA
+                s.graphicalProperties.solidFill = "FF0000"   # kırmızı
+
+
+        # --- Veri etiketleri: 12.0 / 8.0 / 22.0 barların ortasında gözüksün ---
+        chart.dataLabels = DataLabelList()
+        chart.dataLabels.showVal = True      # saniye değerlerini yaz
+        # Eğer istersen yüzdelik de yazsın:
+        # chart.dataLabels.showPercent = True
+        chart.dataLabels.position = "ctr"    # etiketler dilimin ORTASINDA
+
+        chart.dataLabels = DataLabelList()
+        chart.dataLabels.showVal = True
+        
+
+        # Seri isimleri: başlık satırındaki "VA (sn) / NVAN (sn) / NVA (sn)"
+        for i, s in enumerate(chart.series):
+
+
+            for i, s in enumerate(chart.series):
+                series_label = SeriesLabel()
+                series_label.v = ws.cell(row=h, column=sc + 5 + i).value
+                s.title = series_label
+
+        # Kategori etiketi: "toplam süre" yazan hücre (tek kategori)
+        cats = Reference(
+            ws,
+            min_col=sc,       # "toplam süre" yazan sütun
+            max_col=sc,
+            min_row=t,
+            max_row=t
+        )
+        chart.set_categories(cats)
+
+        # Boyut – ince uzun görünmesi için
+        chart.height = 10
+        chart.width = 4
+
+        # Grafiği SOP bandının sağına yerleştir
+        anchor_col = sc + anchor_offset_cols   # istiyorsan 8, 9, 10 ile oynayabilirsin
+        anchor_cell = f"{get_column_letter(anchor_col)}{h}"
+        ws.add_chart(chart, anchor_cell)
+
+    def _add_sop_percent_charts(self, ws, start_row, adim_sayisi):
+        """
+        Üstteki 3 SOP bandının (Zaman Etüdü, Westinghouse, MOST)
+        yanına yüzde dağılım grafiklerini ekler.
+        """
+        # SOL: Zaman Etüdü blok (start_col = 1)
+        self._add_percent_chart_for_sop_band(ws, start_row=start_row, start_col=1,  adim_sayisi=adim_sayisi)
+
+        # ORTA: Westinghouse blok (start_col = 11)
+        self._add_percent_chart_for_sop_band(ws, start_row=start_row, start_col=11, adim_sayisi=adim_sayisi)
+
+        # SAĞ: MOST blok (start_col = 21)
+        self._add_percent_chart_for_sop_band(ws, start_row=start_row, start_col=21, adim_sayisi=adim_sayisi)
+
+
+
+
+
+
+
+
+
+
 
     def _fill_zaman_sop_from_time_study(
         self,
@@ -881,6 +1025,124 @@ class MostExcelJobReport:
                 value=f"=SUM({first_nva}:{last_nva})"
             ).alignment = self.center
 
+    def _fill_most_sop_from_most(
+        self,
+        ws,
+        start_row: int,
+        adim_sayisi: int,
+        job_df: pd.DataFrame,
+        most_map: Dict
+    ) -> None:
+        """
+        Sağdaki (MOST) SOP tablosunu doldurur.
+        Kaynaklar:
+          - Is_Adimlari.csv  -> AdımID, Adım Adı, Öncül Adım, DegerTuru
+          - Basic/Mini/Maxi_Most_Analizleri.csv -> AdımID bazında ToplamSaniye (most_map)
+        """
+
+        # MOST SOP bandı sağ blok: start_col = 21
+        sc = 21                  # başlangıç sütunu (MOST)
+        sr = start_row           # SOP'un başladığı satır (bizde 2)
+        ec = sc + 8
+
+        # _write_sop_band içindeki aynı hesaplar:
+        h = sr + 11              # tablo başlık satırı (No, ID, ...)
+        n = max(10, adim_sayisi) # en az 10 satır
+        data_start = h + 1       # ilk operasyon satırı
+        data_end = h + n         # son operasyon satırı
+        toplam_row = h + 1 + n   # "TOPLAM SÜRE" satırı
+
+        # İş adımlarını hazırlayalım
+        steps = job_df.dropna(subset=["AdımID"]).copy()
+        if steps.empty:
+            return
+
+        # AdımID int olsun ve sıralı gidelim
+        steps["AdımID"] = steps["AdımID"].astype(int)
+        steps = steps.sort_values("AdımID")
+
+        # DegerTuru -> VA / NVAN / NVA sınıflaması (diğer SOP'larla aynı)
+        def _classify(deger):
+            if not isinstance(deger, str):
+                return ""
+            d = deger.strip().upper()
+            if d in ("KD", "VA"):
+                return "VA"
+            if d in ("ZGK", "NVAN", "NVAA", "NV-AN"):
+                return "NVAN"
+            if d in ("KDZ", "NVA"):
+                return "NVA"
+            return ""
+
+        no = 1
+        current_row = data_start
+
+        for _, row in steps.iterrows():
+            if current_row > data_end:
+                break
+
+            adim_id = int(row["AdımID"])
+            op_name = row.get("Adım Adı", "")
+            oncul   = row.get("Öncül Adım", "")
+
+            cat = _classify(row.get("DegerTuru", ""))
+
+            # MOST süresi (sn) – ToplamSaniye haritasından
+            sure = float(most_map.get(adim_id, 0.0) or 0.0)
+
+            # DegerTuru'na göre VA / NVAN / NVA dağıt
+            va = nv_an = nva = 0.0
+            if cat == "VA":
+                va = sure
+            elif cat == "NVAN":
+                nv_an = sure
+            elif cat == "NVA":
+                nva = sure
+
+            # Hücrelere yaz (sağdaki SOP bandı)
+            ws.cell(row=current_row, column=sc,     value=no).alignment = self.center    # No
+            ws.cell(row=current_row, column=sc + 1, value=adim_id).alignment = self.center
+            ws.cell(row=current_row, column=sc + 2, value=op_name).alignment = self.left
+            ws.cell(row=current_row, column=sc + 4, value=oncul).alignment = self.center
+            ws.cell(row=current_row, column=sc + 5, value=round(va, 4)).alignment = self.center
+            ws.cell(row=current_row, column=sc + 6, value=round(nv_an, 4)).alignment = self.center
+            ws.cell(row=current_row, column=sc + 7, value=round(nva, 4)).alignment = self.center
+
+            # Kenarlık
+            for col in range(sc, sc + 8):
+                ws.cell(row=current_row, column=col).border = self.thin_border
+
+            no += 1
+            current_row += 1
+
+        # --- TOPLAM SÜRE satırı için formüller (VA / NVAN / NVA) ---
+        if data_start <= data_end:
+            # VA toplamı
+            first_va = ws.cell(row=data_start, column=sc + 5).coordinate
+            last_va  = ws.cell(row=data_end,   column=sc + 5).coordinate
+            ws.cell(
+                row=toplam_row,
+                column=sc + 5,
+                value=f"=SUM({first_va}:{last_va})"
+            ).alignment = self.center
+
+            # NVAN toplamı
+            first_nv = ws.cell(row=data_start, column=sc + 6).coordinate
+            last_nv  = ws.cell(row=data_end,   column=sc + 6).coordinate
+            ws.cell(
+                row=toplam_row,
+                column=sc + 6,
+                value=f"=SUM({first_nv}:{last_nv})"
+            ).alignment = self.center
+
+            # NVA toplamı
+            first_nva = ws.cell(row=data_start, column=sc + 7).coordinate
+            last_nva  = ws.cell(row=data_end,   column=sc + 7).coordinate
+            ws.cell(
+                row=toplam_row,
+                column=sc + 7,
+                value=f"=SUM({first_nva}:{last_nva})"
+            ).alignment = self.center
 
 
 
@@ -1470,7 +1732,12 @@ class MostExcelJobReport:
         chart.type = "bar"
         chart.grouping = "stacked"
         chart.overlap = 100
+        chart.y_axis.number_format = "0%"
+        chart.y_axis.scaling.min = 0
+        chart.y_axis.scaling.max = 1
+
         chart.title = title
+
 
         # Veri: ES + Süre
         data_ref = Reference(
@@ -1557,14 +1824,28 @@ class MostExcelJobReport:
                 zaman_map = zdf.groupby("AdımID")["Sure"].mean().to_dict()
 
         # MOST süreleri (ToplamSaniye)
-        most_map: Dict = {}
-        if not self.analiz_all.empty and "ToplamSaniye" in self.analiz_all.columns:
-            most_map = (
-                self.analiz_all.dropna(subset=["ToplamSaniye"])
-                .groupby("AdımID")["ToplamSaniye"]
-                .mean()
-                .to_dict()
-            )
+        df_most = (
+            self.analiz_all
+            .dropna(subset=["ToplamSaniye"])
+            .copy()
+        )
+
+        if "AnalizID" in df_most.columns:
+            # AnalizID varsa: en büyük AnalizID = en son yapılan analiz
+            df_most = df_most.sort_values(["AdımID", "AnalizID"])
+            last_rows = df_most.groupby("AdımID").tail(1)
+        else:
+            # AnalizID yoksa: aynı AdımID'lerde en son satırı kabul et
+            df_most = df_most.sort_values(["AdımID"])
+            last_rows = df_most.groupby("AdımID").tail(1)
+
+        most_map = (
+            last_rows
+            .set_index("AdımID")["ToplamSaniye"]
+            .astype(float)
+            .to_dict()
+        )
+
 
        
        # -------- CPM için süre haritaları --------
@@ -1639,6 +1920,20 @@ class MostExcelJobReport:
                 west_map=west_map
             )
         # west_map boşsa: Westinghouse SOP satırları boş kalacak (süre yazmayacağız)
+            # MOST SOP tablosu -> most_map doluysa doldur
+        if most_map:
+            self._fill_most_sop_from_most(
+                ws=ws,
+                start_row=2,
+                adim_sayisi=adim_sayisi,
+                job_df=job_df,
+                most_map=most_map
+            )
+
+        # SOP tabloları doldurulduktan sonra, her bandın yanına
+        # VA–NVAN–NVA yüzde dağılım grafiklerini ekle
+        self._add_sop_percent_charts(ws, start_row=2, adim_sayisi=adim_sayisi)
+
 
 
 
