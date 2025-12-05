@@ -8,6 +8,8 @@ from PyQt5.QtWidgets import (
     QFrame, QSplitter, QDialog, QDialogButtonBox, QListWidget,
     QListWidgetItem
 )
+
+
 from data_manager import DataManager
 from modul_video_analiz import JobManagementPanel, VideoPlayerPanel
 from modul_excel_raporu import create_most_report_job_based
