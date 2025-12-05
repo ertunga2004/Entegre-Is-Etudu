@@ -848,17 +848,17 @@ class BaseMaxiMostTab(QWidget):
         container = QWidget()
         layout = QVBoxLayout(container); layout.setAlignment(Qt.AlignTop)
 
-        # --- YENİ: Genel Tekrar ---
+        # Genel Tekrar
         layout.addWidget(QLabel("Genel Tekrar Sayısı:"))
         layout.addWidget(self.general_repeat_spin)
 
-        # A Parametresi (Kendi tekrar sayısı var)
+        # A Parametresi
         a_group = QGroupBox("A Parametresi (Hareket Mesafesi)")
         temp_a_layout = QVBoxLayout(); temp_a_layout.addWidget(self.a_widget)
         a_group.setLayout(temp_a_layout)
         layout.addWidget(a_group)
         
-        # --- YENİ: B Parametresi (Bireysel tekrar eklendi) ---
+        # B Parametresi
         b_group = QGroupBox("B Parametresi (Vücut Hareketi)")
         b_grid = QGridLayout(b_group)
         b_repeat_spin = QSpinBox(); b_repeat_spin.setRange(1, 1000)
@@ -868,7 +868,7 @@ class BaseMaxiMostTab(QWidget):
         b_grid.addWidget(self.b_widget, 1, 0, 1, 2)
         layout.addWidget(b_group)
         
-        # --- YENİ: Özel Parametre (Bireysel tekrar eklendi) ---
+        # Özel Parametre (P, M, T)
         special_group = QGroupBox(f"{special_letter} Parametresi ({tab_title})")
         special_grid = QGridLayout(special_group)
         special_repeat_spin = QSpinBox(); special_repeat_spin.setRange(1, 1000)
@@ -878,7 +878,7 @@ class BaseMaxiMostTab(QWidget):
         special_grid.addWidget(self.special_widget, 1, 0, 1, 2)
         layout.addWidget(special_group)
         
-        # Sonuç ve Kaydetme Bölümü
+        # Sonuçlar
         result_group = QGroupBox("Sonuçlar")
         result_layout = QGridLayout(result_group)
         result_layout.addWidget(self.tmu_label, 0, 0); result_layout.addWidget(self.seconds_label, 0, 1)
@@ -890,26 +890,22 @@ class BaseMaxiMostTab(QWidget):
         scroll.setWidget(container)
         main_layout.addWidget(scroll)
         
-        # Sinyal bağlantıları
         self.save_btn.clicked.connect(self.save_analysis)
         self.general_repeat_spin.valueChanged.connect(self.calculate_tmu)
 
     def connect_signals_for_calculation(self):
-        """Hesaplamayı tetikleyecek tüm sinyalleri bağlar."""
         # A Widget sinyalleri
         self.a_widget.repeat_input.valueChanged.connect(self.calculate_tmu)
         self.a_widget.steps_input.textChanged.connect(self.calculate_tmu)
         
-        # B Widget sinyalleri ve tekrarı
+        # B Widget sinyalleri
         self.group_repeats['B'].valueChanged.connect(self.calculate_tmu)
         self.b_widget.comboCategory.currentIndexChanged.connect(self.calculate_tmu)
         self.b_widget.comboMotionType.currentIndexChanged.connect(self.calculate_tmu)
         self.b_widget.comboLoadType.currentIndexChanged.connect(self.calculate_tmu)
         self.b_widget.lineRungs.textChanged.connect(self.calculate_tmu)
 
-    # BU METODUN TAMAMINI DEĞİŞTİR
     def calculate_tmu(self):
-        """TMU, Saniye ve Kodlama hesaplamasını yapan ana metod."""
         a_val = self.a_widget.get_a_value()
         a_rep = self.a_widget.get_repeat()
         
@@ -922,18 +918,14 @@ class BaseMaxiMostTab(QWidget):
         total_sequence_tmu = 0
         code = []
 
-        # --- İŞTE DÜZELTME BURADA ---
-        # A değeri seçilmişse hesapla ve kodlamaya ekle
         if a_val is not None:
             total_sequence_tmu += a_val * a_rep
             code.append(f"A<sub>{a_val}</sub>" if a_rep == 1 else f"A({a_rep})<sub>{a_val}</sub>")
 
-        # B değeri seçilmişse hesapla ve kodlamaya ekle
         if b_val is not None:
             total_sequence_tmu += b_val * b_rep
             code.append(f"B<sub>{b_val}</sub>" if b_rep == 1 else f"B({b_rep})<sub>{b_val}</sub>")
 
-        # Özel parametre (P, M veya T) seçilmişse hesapla ve kodlamaya ekle
         if special_val is not None:
             total_sequence_tmu += special_val * special_rep
             code.append(f"{self.special_letter}<sub>{special_val}</sub>" if special_rep == 1 else f"{self.special_letter}({special_rep})<sub>{special_val}</sub>")
@@ -946,28 +938,44 @@ class BaseMaxiMostTab(QWidget):
         self.code_label.setText("Kodlama: " + " ".join(code))
 
     def get_analysis_details(self):
-        """Arayüzdeki tüm geçerli seçimleri bir liste olarak döndürür."""
+        """Arayüzdeki seçimleri 'Breadcrumb' (Zincir) formatında tek satırda döndürür."""
         detaylar = []
         
-        # Genel Tekrar
+        # 1. Genel Tekrar
         detaylar.append({'kod': 'GenelTekrar', 'deger': '', 'tekrar': self.general_repeat_spin.value()})
 
-        # A Parametresi
+        # 2. A Parametresi (Adım Sayısı)
+        # Örn: "Adım: 5"
         if self.a_widget.steps_input.text().strip():
-            detaylar.append({'kod': 'A_AdimSayisi', 'deger': self.a_widget.steps_input.text(), 'tekrar': self.a_widget.get_repeat()})
+            a_text = f"Adım: {self.a_widget.steps_input.text()}"
+            detaylar.append({'kod': 'A_Detay', 'deger': a_text, 'tekrar': self.a_widget.get_repeat()})
 
-        # B Parametresi
+        # 3. B Parametresi (Vücut Hareketi)
+        # Örn: "Merdiven > Ağır Yük > Basamak: 5"
         if self.b_widget.comboCategory.currentIndex() > 0:
-            detaylar.append({'kod': 'B_Kategori', 'deger': self.b_widget.comboCategory.currentText(), 'tekrar': self.group_repeats['B'].value()})
+            b_chain = []
+            
+            # Kategori
+            b_chain.append(self.b_widget.comboCategory.currentText())
+            
+            # Hareket Türü
             if self.b_widget.comboMotionType.isVisible() and self.b_widget.comboMotionType.currentIndex() > 0:
-                detaylar.append({'kod': 'B_HareketTuru', 'deger': self.b_widget.comboMotionType.currentText(), 'tekrar': 1})
+                b_chain.append(self.b_widget.comboMotionType.currentText())
+            
+            # Yük Tipi
             if self.b_widget.comboLoadType.isVisible() and self.b_widget.comboLoadType.currentIndex() > 0:
-                detaylar.append({'kod': 'B_YukTipi', 'deger': self.b_widget.comboLoadType.currentText(), 'tekrar': 1})
+                b_chain.append(self.b_widget.comboLoadType.currentText())
+            
+            # Basamak Sayısı
             if self.b_widget.lineRungs.isVisible() and self.b_widget.lineRungs.text().strip():
-                detaylar.append({'kod': 'B_BasamakSayisi', 'deger': self.b_widget.lineRungs.text(), 'tekrar': 1})
+                b_chain.append(f"Basamak: {self.b_widget.lineRungs.text()}")
+            
+            # Zinciri birleştir ve ekle
+            if b_chain:
+                b_text = " > ".join(b_chain)
+                detaylar.append({'kod': 'B_Detay', 'deger': b_text, 'tekrar': self.group_repeats['B'].value()})
         
-        # P, M veya T Parametresine özel detayları alt sınıftan al
-        # Bu metodu birazdan alt sınıflarda oluşturacağız.
+        # 4. P, M veya T Parametresine özel detaylar (Alt sınıflardan gelen zincir)
         detaylar.extend(self.get_special_details())
         
         return detaylar
@@ -982,12 +990,7 @@ class BaseMaxiMostTab(QWidget):
 
         kodlama = self.code_label.text().replace("Kodlama: ", "").replace("<sub>", "").replace("</sub>", "")
         tmu_text = self.tmu_label.text().replace("TMU: ", "")
-        saniye_text = (
-            self.seconds_label.text()
-            .replace("Saniye: ", "")
-            .replace(" sn", "")
-            .strip()
-        )
+        saniye_text = self.seconds_label.text().replace("Saniye: ", "").replace(" sn", "").strip()
         toplam_saniye = float(saniye_text.replace(",", "."))
 
         if not kodlama or not tmu_text or int(tmu_text) == 0:
@@ -1005,22 +1008,16 @@ class BaseMaxiMostTab(QWidget):
             )
             QMessageBox.information(self, "Başarılı", f"MaxiMOST analizi ({self.most_type}) ve tüm detayları başarıyla kaydedildi.")
         except AttributeError:
-             QMessageBox.critical(self, "Hata", "DataManager'da 'kaydet_maxi_most_analizi' fonksiyonu bulunamadı.\nLütfen data_manager.py dosyasını güncellediğinizden emin olun.")
+             QMessageBox.critical(self, "Hata", "DataManager'da fonksiyon bulunamadı.")
         except Exception as e:
             QMessageBox.critical(self, "Hata", f"Analiz kaydedilirken bir hata oluştu:\n{e}")
-
-
-# --- ÖZEL SEKME SINIFLARI ---
-
-# ŞUNUNLA DEĞİŞTİR:
 class PartHandlingTab(BaseMaxiMostTab):
     """Parça Taşıma Sekmesi (P)"""
     def __init__(self, data_manager):
         super().__init__(data_manager)
         self.setup_ui(PSelectionScreen(), "P", "Parça Taşıma")
-        self.connect_signals_for_calculation() # A ve B'nin ortak sinyallerini bağla
+        self.connect_signals_for_calculation()
         
-        # P'ye özel sinyalleri ve tekrarı bağla
         self.group_repeats['P'].valueChanged.connect(self.calculate_tmu)
         p_widget = self.special_widget
         p_widget.combo_first.currentIndexChanged.connect(self.calculate_tmu)
@@ -1029,26 +1026,42 @@ class PartHandlingTab(BaseMaxiMostTab):
         p_widget.input_field.textChanged.connect(self.calculate_tmu)
     
     def get_special_details(self):
+        """Seçim zincirini ' > ' ile birleştirip tek satır döndürür."""
         p_widget = self.special_widget
-        detaylar = []
-        if p_widget.combo_first.currentIndex() > 0:
-            detaylar.append({'kod': 'P_HareketTipi', 'deger': p_widget.combo_first.currentText(), 'tekrar': self.group_repeats['P'].value()})
-        if p_widget.combo_second.currentIndex() > 0:
-            detaylar.append({'kod': 'P_Tasiima_Tipi', 'deger': p_widget.combo_second.currentText(), 'tekrar': 1})
-        if p_widget.combo_third.currentIndex() > 0:
-            detaylar.append({'kod': 'P_Eylem_Turu', 'deger': p_widget.combo_third.currentText(), 'tekrar': 1})
-        if p_widget.input_field.isEnabled() and p_widget.input_field.text().strip():
-            detaylar.append({'kod': 'P_Sayisal_Deger', 'deger': p_widget.input_field.text(), 'tekrar': 1})
-        return detaylar
+        zincir = [] # Seçimleri tutacak liste
 
+        # 1. Seviye
+        if p_widget.combo_first.currentIndex() > 0:
+            zincir.append(p_widget.combo_first.currentText())
+        
+        # 2. Seviye
+        if p_widget.combo_second.currentIndex() > 0:
+            zincir.append(p_widget.combo_second.currentText())
+            
+        # 3. Seviye
+        if p_widget.combo_third.currentIndex() > 0:
+            zincir.append(p_widget.combo_third.currentText())
+            
+        # Sayısal Değer
+        if p_widget.input_field.isEnabled() and p_widget.input_field.text().strip():
+            etiket = p_widget.label_input.text().replace(":", "")
+            deger = p_widget.input_field.text()
+            zincir.append(f"{etiket}: {deger}")
+
+        # Eğer hiç seçim yoksa boş liste dön
+        if not zincir:
+            return []
+
+        # Listeyi birleştirip tek bir sözlük olarak döndür
+        birlesik_metin = " > ".join(zincir)
+        return [{'kod': 'P_Detay', 'deger': birlesik_metin, 'tekrar': self.group_repeats['P'].value()}]
 class MachineHandlingTab(BaseMaxiMostTab):
     """Makine Taşıma Sekmesi (M)"""
     def __init__(self, data_manager):
         super().__init__(data_manager)
         self.setup_ui(MSelectionScreen(), "M", "Makine Taşıma")
-        self.connect_signals_for_calculation() # A ve B'nin ortak sinyallerini bağla
+        self.connect_signals_for_calculation()
         
-        # M'ye özel sinyalleri ve tekrarı bağla
         self.group_repeats['M'].valueChanged.connect(self.calculate_tmu)
         m_widget = self.special_widget
         m_widget.combo_category.currentIndexChanged.connect(self.calculate_tmu)
@@ -1058,29 +1071,36 @@ class MachineHandlingTab(BaseMaxiMostTab):
 
     def get_special_details(self):
         m_widget = self.special_widget
-        detaylar = []
+        zincir = []
+
         if m_widget.combo_category.currentIndex() > 0:
-            detaylar.append({'kod': 'M_Kategori', 'deger': m_widget.combo_category.currentText(), 'tekrar': self.group_repeats['M'].value()})
+            zincir.append(m_widget.combo_category.currentText())
+            
         if m_widget.combo_main.currentIndex() > 0:
-            detaylar.append({'kod': 'M_Ana_Eylem', 'deger': m_widget.combo_main.currentText(), 'tekrar': 1})
+            zincir.append(m_widget.combo_main.currentText())
+            
         if m_widget.combo_sub.isVisible() and m_widget.combo_sub.currentIndex() > 0:
-            detaylar.append({'kod': 'M_Alt_Eylem', 'deger': m_widget.combo_sub.currentText(), 'tekrar': 1})
+            zincir.append(m_widget.combo_sub.currentText())
+            
         if m_widget.spin_input.isVisible() and m_widget.spin_input.value() > 0:
-            detaylar.append({'kod': 'M_Sayisal_Deger', 'deger': str(m_widget.spin_input.value()), 'tekrar': 1})
-        return detaylar
+            zincir.append(f"Sayısal Değer: {m_widget.spin_input.value()}")
+
+        if not zincir:
+            return []
+
+        birlesik_metin = " > ".join(zincir)
+        return [{'kod': 'M_Detay', 'deger': birlesik_metin, 'tekrar': self.group_repeats['M'].value()}]
 
 class ToolUseTab(BaseMaxiMostTab):
     """Alet Kullanım Sekmesi (T)"""
     def __init__(self, data_manager):
         super().__init__(data_manager)
         self.setup_ui(TSelectionScreen(), "T", "Alet Kullanımı")
-        self.connect_signals_for_calculation() # A ve B'nin ortak sinyallerini bağla
+        self.connect_signals_for_calculation()
         
-        # T'ye özel sinyalleri ve tekrarı bağla
         self.group_repeats['T'].valueChanged.connect(self.calculate_tmu)
         t_widget = self.special_widget
         t_widget.combo_option.currentIndexChanged.connect(self.calculate_tmu)
-        # T'nin alt widget'larındaki tüm değişiklikleri de bağla
         for opt in t_widget.options:
             for child in opt.findChildren((QComboBox, QSpinBox)):
                 if isinstance(child, QComboBox):
@@ -1090,23 +1110,37 @@ class ToolUseTab(BaseMaxiMostTab):
 
     def get_special_details(self):
         t_widget = self.special_widget
-        detaylar = []
+        zincir = []
+
+        # Ana Kategori (Örn: 1: Sıkma/Gevşetme)
         if t_widget.combo_option.currentIndex() >= 0:
-            detaylar.append({'kod': 'T_Kullanim_Tipi', 'deger': t_widget.combo_option.currentText(), 'tekrar': self.group_repeats['T'].value()})
+            zincir.append(t_widget.combo_option.currentText())
 
-            # O an aktif olan alt widget'ın detayını al
+            # Alt widget'taki seçimleri topla
             current_option_widget = t_widget.stack.currentWidget()
-            option_name = t_widget.combo_option.currentText().split(':')[1].strip().replace('/', '_')
+            
+            # Alt widget içindeki ComboBox ve SpinBox'ları sırayla gez
+            # Layout sırasına göre gelmeyebilirler, bu yüzden basitçe bulduklarımızı ekliyoruz.
+            # Daha düzgün olması için widget tipine göre mantık kurabiliriz:
+            
+            # ComboBox'lar (Seçimler)
+            for child in current_option_widget.findChildren(QComboBox):
+                if child.currentIndex() >= 0 and child.currentText():
+                     zincir.append(child.currentText())
+            
+            # SpinBox'lar (Sayılar)
+            for child in current_option_widget.findChildren(QSpinBox):
+                if child.value() > 0:
+                    # Basitçe değeri ekle, yanındaki label'ı bulmak zor olabilir ama
+                    # genelde "x Adet" veya "x Tur" gibidir.
+                    zincir.append(f"Değer: {child.value()}")
 
-            for child in current_option_widget.findChildren((QComboBox, QSpinBox, QLineEdit)):
-                child_name = child.objectName() if child.objectName() else type(child).__name__
-                if isinstance(child, QComboBox) and child.currentIndex() >= 0:
-                    detaylar.append({'kod': f'T_{option_name}_Secim', 'deger': child.currentText(), 'tekrar': 1})
-                elif isinstance(child, QSpinBox) and child.value() > 0:
-                    detaylar.append({'kod': f'T_{option_name}_Sayi', 'deger': str(child.value()), 'tekrar': 1})
-        return detaylar
+        if not zincir:
+            return []
 
-# --- ANA MODÜL SINIFI (ana_uygulama.py'nin kullanacağı sınıf) ---
+        birlesik_metin = " > ".join(zincir)
+        return [{'kod': 'T_Detay', 'deger': birlesik_metin, 'tekrar': self.group_repeats['T'].value()}]
+
 
 class MaxiMostModule(QWidget):
     """Tüm MaxiMOST sekmelerini barındıran ana modül widget'ı."""
