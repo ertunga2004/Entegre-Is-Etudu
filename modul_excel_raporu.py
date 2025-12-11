@@ -1807,6 +1807,7 @@ class MostExcelJobReport:
         # Adım adları, ilk adım en üstte
         chart.y_axis.scaling.orientation = "maxMin"
         chart.y_axis.tickLblPos = "low"  # etiketler sol tarafta
+        chart.y_axis.tickLblPos = "nextTo"
 
         # En sonda grafiği yana çevir (yatay bar)
         chart.type = "bar"
