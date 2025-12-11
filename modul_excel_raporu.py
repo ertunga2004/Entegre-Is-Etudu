@@ -8,7 +8,7 @@ from openpyxl.styles import Alignment, Font, PatternFill, Border, Side
 from openpyxl.utils import get_column_letter
 # Series ve ChartLines buraya eklendi
 from openpyxl.chart import BarChart, Reference, Series
-from openpyxl.chart.axis import ChartLines
+from openpyxl.chart.axis import ChartLines, TextAxis
 from openpyxl.worksheet.hyperlink import Hyperlink
 from openpyxl.chart.label import DataLabelList
 from openpyxl.chart.series import SeriesLabel
@@ -1659,11 +1659,14 @@ class MostExcelJobReport:
                                    title: str, cpm_rows: List[Dict]) -> int:
         """
         Üstte CPM verileri, altta GANTT Şeması oluşturur.
-        Gantt şeması: 
-        - İlk iş en üstte (şelale yapısı).
-        - Sadece süre çubukları görünür (başlangıç kısmı şeffaf).
-        - Çubuklar VA (Yeşil), NVAN (Sarı), NVA (Kırmızı) olarak renklendirilir.
+        Excel'in dosya yapısını bozmadan (corrupt hatası vermeden)
+        iş adlarını solda gösteren düzeltilmiş versiyon.
         """
+        # Gerekli importları buraya alalım, kafa karışıklığı olmasın
+        from openpyxl.chart import BarChart, Reference, Series
+        from openpyxl.chart.axis import ChartLines
+        from openpyxl.utils import get_column_letter
+
         if not cpm_rows:
             return start_row
 
@@ -1701,31 +1704,27 @@ class MostExcelJobReport:
 
         last_cpm_row = data_start + len(cpm_rows) - 1
 
-        # --- 2. GANTT VERİ HAZIRLIĞI (Stacked Bar Mantığı) ---
-        # Excel'de Gantt yapmak için:
-        # Seri 1: Başlangıç (ES) -> Şeffaf/Görünmez yapılır (Barı sağa iter)
-        # Seri 2: VA Süresi -> Yeşil
-        # Seri 3: NVAN Süresi -> Sarı
-        # Seri 4: NVA Süresi -> Kırmızı
-        
+        # --- 2. GANTT VERİ HAZIRLIĞI ---
         gantt_data_start_row = last_cpm_row + 3
+        data_rows_count = len(cpm_rows)  # Eksik değişken tanımlandı
         
-        # Başlıklar (Grafik kaynağı olacak gizli tablo)
+        # Başlıklar
         g_headers = ["Adım Adı", "Başlangıç (ES)", "VA", "NVAN", "NVA"]
         for i, h in enumerate(g_headers):
             ws.cell(row=gantt_data_start_row, column=col_start + i, value=h)
 
-        # Verileri ayrıştırarak yaz
+        # Verileri yaz
         for idx, row in enumerate(cpm_rows):
             rr = gantt_data_start_row + 1 + idx
             
             # Adım Adı (Y Ekseni Etiketi)
-            ws.cell(row=rr, column=col_start, value=row["Adım Adı"])
+            step_name = row.get("Adım Adı") or f"Adım {row.get('AdımID', idx + 1)}"
+            ws.cell(row=rr, column=col_start, value=step_name)
             
-            # Başlangıç Zamanı (Görünmez Olacak Seri)
+            # Başlangıç Zamanı
             ws.cell(row=rr, column=col_start + 1, value=row["ES"])
             
-            # Süreyi Değer Türüne Göre İlgili Sütuna Yaz, Diğerlerine 0 Yaz
+            # Süre Değerleri
             sure = row["Süre"]
             d_turu = row["DegerTuru"]
             
@@ -1733,74 +1732,90 @@ class MostExcelJobReport:
             nvan_val = sure if d_turu in ("NVAN", "ZGK", "NVAA") else 0
             nva_val = sure if d_turu in ("NVA", "KDZ", "KDS") else 0
             
-            # Eğer tür belirtilmemişse varsayılan olarak NVA kabul edelim (ya da tercihe göre VA)
             if va_val == 0 and nvan_val == 0 and nva_val == 0:
                 nva_val = sure
 
-            ws.cell(row=rr, column=col_start + 2, value=va_val)   # VA (Yeşil)
-            ws.cell(row=rr, column=col_start + 3, value=nvan_val) # NVAN (Sarı)
-            ws.cell(row=rr, column=col_start + 4, value=nva_val)  # NVA (Kırmızı)
+            ws.cell(row=rr, column=col_start + 2, value=va_val)
+            ws.cell(row=rr, column=col_start + 3, value=nvan_val)
+            ws.cell(row=rr, column=col_start + 4, value=nva_val)
 
-        # --- 3. GANTT GRAFİĞİNİ OLUŞTURMA ---
+
+
+                # --- 3. GANTT GRAFİĞİNİ OLUŞTURMA ---
         chart = BarChart()
-        chart.type = "bar"      # Yatay Çubuk
-        chart.grouping = "stacked" # Yığılmış
+
+        # Önce dikey stacked sütun gibi kur
+        chart.type = "col"
+        chart.grouping = "stacked"
         chart.overlap = 100
         chart.title = title.replace("CPM + Gantt", "Gantt Şeması")
-        chart.style = 10 # Genel stil
-        
-        # --- Seri Tanımları ---
-        data_rows_count = len(cpm_rows)
-        
-        # X Ekseni (Kategoriler: Adım Adları)
-        cats = Reference(ws, min_col=col_start, min_row=gantt_data_start_row+1, max_row=gantt_data_start_row+data_rows_count)
+        # chart.style = 10  # İstersen bırak, şimdilik hiç style vermeyelim
+
+        # Boyut
+        chart.height = 3 + (data_rows_count * 0.5)
+        chart.width = 25
+
+        # --- VERİLERİ VE KATEGORİLERİ BAĞLAMA ---
+
+        # B: Başlangıç(ES), C: VA, D: NVAN, E: NVA
+        data = Reference(
+            ws,
+            min_col=col_start + 1,                 # Başlangıç (ES)
+            min_row=gantt_data_start_row,          # başlık satırı dahil
+            max_col=col_start + 4,
+            max_row=gantt_data_start_row + data_rows_count
+        )
+        chart.add_data(data, titles_from_data=True)
+
+        # Kategoriler: A sütunundaki "Adım Adı"
+        cats = Reference(
+            ws,
+            min_col=col_start,
+            min_row=gantt_data_start_row + 1,      # başlık hariç
+            max_row=gantt_data_start_row + data_rows_count
+        )
         chart.set_categories(cats)
 
-        # 1. Seri: Başlangıç (ES) -> GÖRÜNMEZ YAP (No Fill)
-        es_data = Reference(ws, min_col=col_start+1, min_row=gantt_data_start_row, max_row=gantt_data_start_row+data_rows_count)
-        s_es = Series(es_data, title_from_data=True)
-        s_es.graphicalProperties.noFill = True # Dolgu yok, sadece öteleme sağlar
-        chart.series.append(s_es)
+        # --- SERİLERİ BİÇİMLENDİRME ---
 
-        # 2. Seri: VA (Yeşil)
-        va_data = Reference(ws, min_col=col_start+2, min_row=gantt_data_start_row, max_row=gantt_data_start_row+data_rows_count)
-        s_va = Series(va_data, title_from_data=True)
-        s_va.graphicalProperties.solidFill = "00B050" # Yeşil
+        # 1. seri: Başlangıç (ES) -> görünmez (sadece ofset)
+        s_es = chart.series[0]
+        s_es.graphicalProperties.noFill = True
+        s_es.graphicalProperties.line.noFill = True
+
+        # 2. seri: VA (yeşil)
+        s_va = chart.series[1]
+        s_va.graphicalProperties.solidFill = "00B050"
         s_va.graphicalProperties.line.noFill = True
-        chart.series.append(s_va)
 
-        # 3. Seri: NVAN (Sarı)
-        nvan_data = Reference(ws, min_col=col_start+3, min_row=gantt_data_start_row, max_row=gantt_data_start_row+data_rows_count)
-        s_nvan = Series(nvan_data, title_from_data=True)
-        s_nvan.graphicalProperties.solidFill = "FFFF00" # Sarı
+        # 3. seri: NVAN (sarı)
+        s_nvan = chart.series[2]
+        s_nvan.graphicalProperties.solidFill = "FFFF00"
         s_nvan.graphicalProperties.line.noFill = True
-        chart.series.append(s_nvan)
 
-        # 4. Seri: NVA (Kırmızı)
-        nva_data = Reference(ws, min_col=col_start+4, min_row=gantt_data_start_row, max_row=gantt_data_start_row+data_rows_count)
-        s_nva = Series(nva_data, title_from_data=True)
-        s_nva.graphicalProperties.solidFill = "FF0000" # Kırmızı
+        # 4. seri: NVA (kırmızı)
+        s_nva = chart.series[3]
+        s_nva.graphicalProperties.solidFill = "FF0000"
         s_nva.graphicalProperties.line.noFill = True
-        chart.series.append(s_nva)
 
-        # --- Grafik Ayarları ---
-        # Y Ekseni (İşler): Ters sırala ki ilk iş en üstte olsun
-        chart.y_axis.scaling.orientation = "maxMin" 
-        chart.y_axis.majorTickMark = "out"
-        
-        # X Ekseni (Zaman): Izgara çizgileri
-        from openpyxl.chart.axis import ChartLines
-        chart.x_axis.majorGridlines = ChartLines() # Dikey zaman çizgileri
+        # --- EKSEN AYARLARI ---
+
+        # Zaman ekseni soldan sağa (0 solda)
         chart.x_axis.title = "Zaman (sn)"
-        
-        # Boyut ve Konum
-        chart.height = 10 + (data_rows_count * 0.5) # İş sayısına göre yükseklik
-        chart.width = 18
-        
+        chart.x_axis.scaling.orientation = "minMax"
+
+        # Adım adları, ilk adım en üstte
+        chart.y_axis.scaling.orientation = "maxMin"
+        chart.y_axis.tickLblPos = "low"  # etiketler sol tarafta
+
+        # En sonda grafiği yana çevir (yatay bar)
+        chart.type = "bar"
+
+        # Grafiği yerleştir
         anchor_cell = f"{get_column_letter(col_start)}{gantt_data_start_row + data_rows_count + 2}"
         ws.add_chart(chart, anchor_cell)
 
-        return gantt_data_start_row + data_rows_count + 20 # Sonraki içerik için boşluk
+        return gantt_data_start_row + data_rows_count + 20
 
 
 
