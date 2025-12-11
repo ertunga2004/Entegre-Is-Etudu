@@ -1713,13 +1713,15 @@ class MostExcelJobReport:
         for i, h in enumerate(g_headers):
             ws.cell(row=gantt_data_start_row, column=col_start + i, value=h)
 
+        step_labels: List[str] = []
         # Verileri yaz
         for idx, row in enumerate(cpm_rows):
             rr = gantt_data_start_row + 1 + idx
             
             # Adım Adı (Y Ekseni Etiketi)
-            step_name = row.get("Adım Adı") or f"Adım {row.get('AdımID', idx + 1)}"
+            step_name = str(row.get("Adım Adı") or f"Adım {row.get('AdımID', idx + 1)}")
             ws.cell(row=rr, column=col_start, value=step_name)
+            step_labels.append(step_name)
             
             # Başlangıç Zamanı
             ws.cell(row=rr, column=col_start + 1, value=row["ES"])
@@ -1740,7 +1742,7 @@ class MostExcelJobReport:
             ws.cell(row=rr, column=col_start + 4, value=nva_val)
 
 
-
+        data_rows_count = len(step_labels)
                 # --- 3. GANTT GRAFİĞİNİ OLUŞTURMA ---
         chart = BarChart()
 
